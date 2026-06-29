@@ -13,3 +13,6 @@
 *.xcodeproj/
 *.user
 .DS_Store
+
+# Local packaging output
+/dist/
