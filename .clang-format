@@ -1,0 +1,23 @@
+# JUCE-style formatting, matching the existing source (Allman braces, a space
+# before call/control parens, 4-space indent). Run `clang-format -i source/**`.
+---
+Language:        Cpp
+BasedOnStyle:    LLVM
+Standard:        c++17
+IndentWidth:     4
+TabWidth:        4
+UseTab:          Never
+ColumnLimit:     110
+AccessModifierOffset: -4
+BreakBeforeBraces: Allman
+SpaceBeforeParens: Always
+PointerAlignment: Left
+AlignAfterOpenBracket: Align
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: false
+AllowShortLoopsOnASingleLine: false
+AlignConsecutiveAssignments: Consecutive
+AlignConsecutiveDeclarations: Consecutive
+SortIncludes: false
+KeepEmptyLinesAtTheStartOfBlocks: false
+MaxEmptyLinesToKeep: 1

@@ -1,0 +1,15 @@
+# Build output
+/build/
+/cmake-build-*/
+*.o
+*.obj
+
+# JUCE-fetched dependencies (re-downloaded by CMake)
+/_deps/
+
+# IDE / editor
+.vscode/
+.idea/
+*.xcodeproj/
+*.user
+.DS_Store
