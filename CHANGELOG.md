@@ -4,9 +4,32 @@ All notable changes to FFTDelay are documented here. The format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); the project uses semantic
 versioning once it reaches 1.0.
 
-## [Unreleased]
+## [Unreleased] — the v2 rework
 
-### Added
+### Changed
+- **The painted matrices are now the parameters** (state version 2, with a
+  migrator for v1 sessions): the global delay/feedback/attenuation scalers are
+  replaced by per-matrix automatable offsets, per-matrix L/R links, and stage
+  bypasses. Feedback reaches a true 100%; curve bottoms are a genuine full cut.
+- **Engine fidelity:** real 1024-band mode (frame 2048), a spectral ring that
+  holds a full 12 s at every FFT/overlap combination with zero audio-thread
+  allocation, whole-frame delay quantisation, true zero-delay passthrough with
+  inert feedback, and constant reported latency with internal alignment.
+- **The LFO grew to 25 destinations:** value X / frequency Y / selected-bands
+  Sel per matrix per channel, plus the six Input Mod controls.
+- **Input Mod audit:** Scatter is a true per-band time displacement, Invert a
+  level inversion, Pulse Gate recirculates through internal feedback; all
+  algorithms carry original names (Erode, Invert, Bin Shift, Smear, Drift,
+  Ripple, Scatter, Comb, Pulse Gate, Spectral Gate, Phase Scramble) and a
+  finite-output regression test.
+- **Complete UI rebuild** on a design-token theme: section cards (GLOBAL /
+  EDIT / LFO / ANALYSIS / INPUT MOD), tempo toolbar with live BPM, the matrix
+  field with L-top/R-bottom rows and a per-column graph-control strip,
+  vertical-frequency editors with glow-edge rendering and tempo gridlines,
+  shift-drag red band selection, IN/OUT sonograms, curve transformers and
+  six-shape generators with undo, and free 75–200% vector resizing.
+
+### Added (before the rework)
 - **Per-band spectral engine** — Attenuation / Delay / Feedback matrices as
   painted 160-point curves, with selectable Edit Mask (Linear / Adapted 2× / 4× /
   Logarithmic).

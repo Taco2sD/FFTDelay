@@ -17,25 +17,29 @@ preset system and complete MIDI Learn.
 
 ### Controls
 
-**The three matrices** (painted per-band curves, drag to draw, double-click to reset):
-- **Attenuation** — per-band gain (spectral filter)
-- **Delay** — per-band delay time
-- **Feedback** — per-band feedback
+**The matrix field** — the heart of the plugin. Three accent-tinted columns
+(**Attenuation** | **Delay** | **Feedback**, the Delay column widest) with the
+LEFT channel as the top row and the RIGHT channel as the bottom row. Drag to
+draw (frequency runs bottom→top, values extend rightward; Attenuation paints
+in cut-orientation), double-click to reset, **shift-drag** to select bands in
+red (the "Sel" modulation target). The graph-control strip between the rows
+carries each column's **Bypass**, **Link**, and **copy up/down** buttons; the
+painted curves ARE the values, with per-matrix automatable offsets on top.
+Scrolling **IN/OUT sonograms** flank the field, split L-top/R-bottom.
 
-Both L and R channels are shown at once (six bars, two columns). **Link L/R**
-mirrors edits; **Copy L→R / R→L** copy one channel onto the other. A live
-**spectral analyzer** is drawn behind each curve, aligned to the edit-mask axis.
-
-**Analysis:** FFT size (64–1024), Overlap (none/2×/3×), Window
-(Hann/Triangle/Hamming/Rectangle), Edit Mask (Linear / Adapted 2× / 4× / Log).
-
-**Delay:** master Delay + Delay Range (375 ms…12 s); tempo **Sync** to a grid
-(¼, ⅛, ⅛T, 1⁄16) with **Auto Quantize**; **Smooth** to smear the matrices.
+**Cards:** GLOBAL (presets, Dry/Wet + Effect Gain, Mute/Bypass/Freeze, MIDI),
+EDIT (offsets, transformers QNT/AVG/FLPX/FLPY/SMTH, six-shape curve generators
+with AMP/PER, GO/UNDO, delay-memory reset), LFO, ANALYSIS (Bands 64–1024,
+Overlap 0×/1×/2×, Window, Edit Mask Linear / Adapted 2× / 4× / Log), and an
+INPUT MOD card along the bottom. A tempo toolbar carries Max Delay
+(375 ms…12 s), Grid (¼/⅛/⅛T/1⁄16), Sync, Auto-Quant, and a live BPM readout.
+The whole window resizes freely from 75% to 200% as crisp vectors.
 
 **LFO:** on/off, 6 waveforms (sine/triangle/saw up/saw down/square/random),
-free rate (Hz) or tempo **Sync** (1/1…1/16), and 3 routings → Attenuation /
-Delay / Feedback / Dry-Wet / Effect Gain / Matrix X (freq) / Matrix Y (level),
-each with bipolar depth.
+free rate (Hz) or tempo **Sync** (1/1…1/16), and 3 routing slots with bipolar
+depth across 25 destinations: value offset (X), frequency shift (Y), or
+selected-bands offset (Sel) for every matrix on either channel, plus the six
+Input Mod controls.
 
 **Input Modulation:** one of 11 frequency-domain algorithms (Erode, Invert,
 Bin Shift, Smear, Drift, Ripple, Scatter, Comb, Pulse Gate, Spectral Gate,
