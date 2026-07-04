@@ -38,22 +38,25 @@ void FFTDelayAudioProcessor::createFactoryPresets()
 
     presetManager.savePreset ("Init");
 
-    setP ("delayTime", 0.5f); setP ("delaySync", 1.0f); setP ("delayGrid", 1.0f);
-    setP ("feedback", 0.45f); setP ("dryWet", 0.5f);
+    setCurve (SpectralCurves::Delay, 0.35f, 0.35f); setCurve (SpectralCurves::Feedback, 0.45f, 0.45f);
+    setP ("delaySync", 1.0f); setP ("delayGrid", 1.0f); setP ("dryWet", 0.5f);
     presetManager.savePreset ("Spectral Echo");
     restore();
 
-    setP ("freeze", 1.0f); setP ("feedback", 0.9f); setP ("dryWet", 0.7f);
+    setCurve (SpectralCurves::Feedback, 0.9f, 0.9f);
+    setP ("freeze", 1.0f); setP ("dryWet", 0.7f);
     presetManager.savePreset ("Freeze Pad");
     restore();
 
     setCurve (SpectralCurves::Feedback, 0.25f, 1.0f);   // feedback rises into the highs
-    setP ("delayTime", 0.3f); setP ("delaySync", 1.0f); setP ("delayGrid", 1.0f); setP ("dryWet", 0.55f);
+    setCurve (SpectralCurves::Delay, 0.3f, 0.3f);
+    setP ("delaySync", 1.0f); setP ("delayGrid", 1.0f); setP ("dryWet", 0.55f);
     presetManager.savePreset ("Hi-Band Shimmer");
     restore();
 
+    setCurve (SpectralCurves::Delay, 0.6f, 0.6f); setCurve (SpectralCurves::Feedback, 0.5f, 0.5f);
     setP ("inputMod", 4.0f); setP ("imCtrl1", 0.6f);    // Smear
-    setP ("delayTime", 0.6f); setP ("delayRange", 4.0f); setP ("feedback", 0.5f); setP ("dryWet", 0.6f);
+    setP ("delayRange", 4.0f); setP ("dryWet", 0.6f);
     presetManager.savePreset ("Smear Wash");
     restore();
 
@@ -84,16 +87,23 @@ FFTDelayAudioProcessor::createParameterLayout()
     layout.add (std::make_unique<BoolParam>(juce::ParameterID { "bypass", 1 }, "Bypass", false));
     layout.add (std::make_unique<BoolParam>(juce::ParameterID { "freeze", 1 }, "Freeze", false));
 
-    // Stereo: when linked, both channels are driven from the L matrices.
-    layout.add (std::make_unique<BoolParam>(juce::ParameterID { "link", 1 }, "Link L/R", true));
-
-    // --- Delay / Feedback / Attenuation matrices (global values for now) -------
-    layout.add (std::make_unique<FloatParam>(
-        juce::ParameterID { "delayTime", 1 }, "Delay",
-        juce::NormalisableRange<float> { 0.0f, 1.0f, 0.001f, 0.5f }, 0.1f));
+    // --- The three matrices ----------------------------------------------------
+    // The painted curves ARE the values (no global scalers behind them). Each
+    // matrix gets: an automatable value-axis offset (added to every point of both
+    // channels at fan-out time), an L/R link, and a stage bypass.
+    for (const auto* m : { "att", "delay", "fb" })
+    {
+        const juce::String id (m), Name = juce::String (m) == "att"   ? "Attenuation"
+                                        : juce::String (m) == "delay" ? "Delay" : "Feedback";
+        layout.add (std::make_unique<FloatParam>(
+            juce::ParameterID { id + "OffX", 1 }, Name + " Offset",
+            juce::NormalisableRange<float> { -1.0f, 1.0f, 0.001f }, 0.0f));
+        layout.add (std::make_unique<BoolParam>(juce::ParameterID { id + "Link",   1 }, Name + " Link",   true));
+        layout.add (std::make_unique<BoolParam>(juce::ParameterID { id + "Bypass", 1 }, Name + " Bypass", false));
+    }
 
     layout.add (std::make_unique<ChoiceParam>(
-        juce::ParameterID { "delayRange", 1 }, "Delay Range",
+        juce::ParameterID { "delayRange", 1 }, "Max Delay",
         juce::StringArray { "375 ms", "750 ms", "1.5 s", "3 s", "6 s", "12 s" }, 3));
 
     // Tempo grid for the delay matrix: snap per-band delays to a musical division.
@@ -106,22 +116,15 @@ FFTDelayAudioProcessor::createParameterLayout()
     // When on, the grid tracks live host tempo; off uses a fixed 120 BPM reference.
     layout.add (std::make_unique<BoolParam>(juce::ParameterID { "autoQuantize", 1 }, "Auto Quant", true));
 
-    layout.add (std::make_unique<FloatParam>(
-        juce::ParameterID { "feedback", 1 }, "Feedback",
-        juce::NormalisableRange<float> { 0.0f, 0.99f, 0.001f }, 0.3f));
-
-    layout.add (std::make_unique<FloatParam>(
-        juce::ParameterID { "attenuation", 1 }, "Attenuation",
-        juce::NormalisableRange<float> { -60.0f, 0.0f, 0.1f }, 0.0f));
-
     // --- Spectral analysis (FFT) ---------------------------------------------
     layout.add (std::make_unique<ChoiceParam>(
         juce::ParameterID { "fftSize", 1 }, "Bands",
         juce::StringArray { "64", "128", "256", "512", "1024" }, 4));
 
+    // Hop = frame / (overlap + 1); 0x deliberately breaks perfect reconstruction.
     layout.add (std::make_unique<ChoiceParam>(
         juce::ParameterID { "overlap", 1 }, "Overlap",
-        juce::StringArray { "None", "2x", "3x" }, 1));
+        juce::StringArray { "0x", "1x", "2x" }, 1));
 
     layout.add (std::make_unique<ChoiceParam>(
         juce::ParameterID { "window", 1 }, "Window",
@@ -133,9 +136,9 @@ FFTDelayAudioProcessor::createParameterLayout()
 
     // --- Input Modulation (frequency-domain treatments) ----------------------
     // A left set + a right set with an 'L' link; when linked, both use the left.
-    const juce::StringArray imAlgorithms { "None", "Deterioration", "Jello Mold", "PitchRoll",
-                                           "Smear", "TimeSponge", "Foam", "Lime Twist", "Horse Tail",
-                                           "Mini-Pulses", "Imprint", "Phase Blaster" };
+    const juce::StringArray imAlgorithms { "None", "Erode", "Invert", "Bin Shift",
+                                           "Smear", "Drift", "Ripple", "Scatter", "Comb",
+                                           "Pulse Gate", "Spectral Gate", "Phase Scramble" };
 
     auto addInputModSet = [&] (const juce::String& suffix, const juce::String& label)
     {
@@ -170,10 +173,18 @@ FFTDelayAudioProcessor::createParameterLayout()
         juce::ParameterID { "lfoSyncRate", 1 }, "LFO Div",
         juce::StringArray { "1/1", "1/2", "1/4", "1/8", "1/16" }, 2));
 
-    // Three modulation routings: destination + bipolar depth.
-    const juce::StringArray destinations { "None", "Attenuation", "Delay", "Feedback",
-                                           "Dry/Wet", "Effect Gain", "Matrix X (freq)",
-                                           "Matrix Y (level)" };
+    // Three modulation routings: destination + bipolar depth. Destinations 1..18
+    // are {matrix} x {channel} x {value-offset X / frequency-shift Y / selected
+    // bands}; 19..24 modulate the Input Mod controls. Decoded in processBlock.
+    juce::StringArray destinations { "No Assignment" };
+    for (const auto* m : { "Att", "Delay", "FB" })
+        for (const auto* ch : { "L", "R" })
+            for (const auto* axis : { "X", "Y", "Sel" })
+                destinations.add (juce::String (m) + " " + ch + " " + axis);
+    for (const auto* ch : { "L", "R" })
+        for (int i = 1; i <= 3; ++i)
+            destinations.add ("Input Mod " + juce::String (ch) + " " + juce::String (i));
+
     for (int i = 1; i <= 3; ++i)
     {
         layout.add (std::make_unique<ChoiceParam>(
@@ -307,11 +318,21 @@ void FFTDelayAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     const bool  bypass = apvts.getRawParameterValue ("bypass")->load() > 0.5f;
     const bool  freeze = apvts.getRawParameterValue ("freeze")->load() > 0.5f;
 
-    float       delayFrac = apvts.getRawParameterValue ("delayTime")->load();
-    const int   rangeIdx  = (int) apvts.getRawParameterValue ("delayRange")->load();
-    float       feedback  = apvts.getRawParameterValue ("feedback")->load();
-    float       attenDb   = apvts.getRawParameterValue ("attenuation")->load();
+    // Per-matrix controls, indexed [Attenuation, Delay, Feedback] to match
+    // SpectralCurves::Matrix. offX is the automatable whole-curve value offset.
+    static const char* matrixIds[] = { "att", "delay", "fb" };
+    float offX     [SpectralCurves::numMatrices];
+    bool  mtxLink  [SpectralCurves::numMatrices];
+    bool  mtxBypass[SpectralCurves::numMatrices];
+    for (int m = 0; m < SpectralCurves::numMatrices; ++m)
+    {
+        const juce::String id (matrixIds[m]);
+        offX[m]      = apvts.getRawParameterValue (id + "OffX")->load();
+        mtxLink[m]   = apvts.getRawParameterValue (id + "Link")->load()   > 0.5f;
+        mtxBypass[m] = apvts.getRawParameterValue (id + "Bypass")->load() > 0.5f;
+    }
 
+    const int   rangeIdx   = (int) apvts.getRawParameterValue ("delayRange")->load();
     const int   fftIdx     = (int) apvts.getRawParameterValue ("fftSize")->load();
     const int   overlapIdx = (int) apvts.getRawParameterValue ("overlap")->load();
     const int   windowIdx  = (int) apvts.getRawParameterValue ("window")->load();
@@ -320,7 +341,6 @@ void FFTDelayAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     const bool  delaySync    = apvts.getRawParameterValue ("delaySync")->load()    > 0.5f;
     const int   gridIdx      = (int) apvts.getRawParameterValue ("delayGrid")->load();
     const bool  autoQuantize = apvts.getRawParameterValue ("autoQuantize")->load() > 0.5f;
-    const bool  linked       = apvts.getRawParameterValue ("link")->load() > 0.5f;
 
     // Host tempo (used by both the delay grid and a synced LFO).
     double bpm = 120.0;
@@ -330,9 +350,15 @@ void FFTDelayAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                 bpm = *hostBpm;
 
     // --- LFO: advance once per block, then route to up to 3 destinations -------
+    // Modulation targets are whole-curve offsets applied at fan-out time (the
+    // stored curves are never redrawn): X = value offset, Y = frequency shift,
+    // Sel = selected-bands offset (inert until band selection lands). Plus the
+    // six Input Mod controls.
     const bool lfoOn = apvts.getRawParameterValue ("lfoOn")->load() > 0.5f;
     float lfoValue = 0.0f;
-    float matrixXmod = 0.0f, matrixYmod = 0.0f;   // LFO -> matrix axis offsets
+    float lfoX[SpectralCurves::numMatrices][2] {};   // [matrix][channel] value offset
+    float lfoY[SpectralCurves::numMatrices][2] {};   // [matrix][channel] freq shift
+    float imMod[2][3] {};                            // [channel][control]
     if (lfoOn)
     {
         const int   wave    = (int) apvts.getRawParameterValue ("lfoWave")->load();
@@ -366,22 +392,22 @@ void FFTDelayAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             case 5: default: lfoValue = lfoRandom;                          break; // Random / S&H
         }
 
-        // Apply each routing slot to its destination (additive, then clamped).
+        // Decode each routing slot: 0 none; 1..18 = (matrix, channel, X/Y/Sel)
+        // in matrix-major order; 19..24 = Input Mod controls (L 1-3, R 1-3).
         for (int i = 1; i <= 3; ++i)
         {
             const int   dest  = (int) apvts.getRawParameterValue ("lfoDest"  + juce::String (i))->load();
-            const float depth = apvts.getRawParameterValue ("lfoDepth" + juce::String (i))->load();
-            const float mod   = depth * lfoValue;
-            switch (dest)
+            const float mod   = apvts.getRawParameterValue ("lfoDepth" + juce::String (i))->load() * lfoValue;
+            if (dest >= 1 && dest <= 18)
             {
-                case 1: attenDb      += mod * 24.0f; break;  // Attenuation (dB)
-                case 2: delayFrac    += mod * 0.5f;  break;  // Delay (fraction of range)
-                case 3: feedback     += mod * 0.5f;  break;  // Feedback
-                case 4: dryWet       += mod * 0.5f;  break;  // Dry/Wet
-                case 5: effectGainDb += mod * 12.0f; break;  // Effect Gain (dB)
-                case 6: matrixXmod   += mod;         break;  // Matrix X: scroll curves in freq
-                case 7: matrixYmod   += mod;         break;  // Matrix Y: offset curve levels
-                default: break;                              // None
+                const int m = (dest - 1) / 6, ch = ((dest - 1) % 6) / 3, axis = (dest - 1) % 3;
+                if      (axis == 0) lfoX[m][ch] += mod;
+                else if (axis == 1) lfoY[m][ch] += mod;
+                // axis == 2 (Sel): applied once band selection exists.
+            }
+            else if (dest >= 19 && dest <= 24)
+            {
+                imMod[(dest - 19) / 3][(dest - 19) % 3] += mod;
             }
         }
     }
@@ -390,16 +416,11 @@ void FFTDelayAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         lfoPhase = 0.0;
     }
 
-    dryWet    = juce::jlimit (0.0f, 1.0f,  dryWet);
-    feedback  = juce::jlimit (0.0f, 0.99f, feedback);
-    delayFrac = juce::jlimit (0.0f, 1.0f,  delayFrac);
-    attenDb   = juce::jlimit (-60.0f, 0.0f, attenDb);
-
+    dryWet = juce::jlimit (0.0f, 1.0f, dryWet);
     const float effectGain = juce::Decibels::decibelsToGain (effectGainDb);
 
     static constexpr float rangeSeconds[] = { 0.375f, 0.75f, 1.5f, 3.0f, 6.0f, 12.0f };
-    const float masterDelaySeconds = delayFrac * rangeSeconds[juce::jlimit (0, 5, rangeIdx)];
-    const float masterAttenGain    = juce::Decibels::decibelsToGain (attenDb);
+    const float maxDelaySeconds = rangeSeconds[juce::jlimit (0, 5, rangeIdx)];
 
     // Tempo grid: snap delays to a musical division of the (live or fixed) tempo.
     float gridSeconds = 0.0f;
@@ -411,7 +432,8 @@ void FFTDelayAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     }
     const int numChannels = juce::jmin (buffer.getNumChannels(), (int) spectralDelays.size());
 
-    const bool  imLink = apvts.getRawParameterValue ("imLink")->load() > 0.5f;
+    const bool  imLink   = apvts.getRawParameterValue ("imLink")->load()   > 0.5f;
+    const bool  imBypass = apvts.getRawParameterValue ("imBypass")->load() > 0.5f;
     const int   imAlgo[2] = { (int) apvts.getRawParameterValue ("inputMod")->load(),
                               (int) apvts.getRawParameterValue ("inputModR")->load() };
     const float imC1[2]   = { apvts.getRawParameterValue ("imCtrl1")->load(),  apvts.getRawParameterValue ("imCtrl1R")->load() };
@@ -427,39 +449,43 @@ void FFTDelayAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         sd.setOverlap (overlapIdx);
         sd.setWindowType (windowIdx);
         sd.setFreeze (freeze);
-        sd.setInputMod (imAlgo[s], imC1[s], imC2[s], imC3[s]);
+        auto imc = [&] (float base, int ctl) { return juce::jlimit (0.0f, 1.0f, base + imMod[s][ctl]); };
+        sd.setInputMod (imBypass ? 0 : imAlgo[s],
+                        imc (imC1[s], 0), imc (imC2[s], 1), imc (imC3[s], 2));
         sd.applyPendingSettings();
     }
 
     const int activeBins = spectralDelays[0].getActiveNumBins();
 
-    // LFO -> matrix axes: X scrolls the painted curves in frequency (in edit
-    // bands), Y offsets every curve's level.
-    const int   matrixXshift = (int) std::lround (matrixXmod * (float) (SpectralCurves::numEditBands / 4));
-    const float matrixYoff   = matrixYmod * 0.5f;
-
     for (int ch = 0; ch < numChannels; ++ch)
     {
         auto& sd = spectralDelays[(size_t) ch];
 
-        // Fan the painted edit-band curves onto the analysis bins, from this
-        // channel's own matrices (or the L set when linked). The curve value is a
-        // 0..1 multiplier on the master knob, so flat curves == global mode.
-        const SpectralCurves& src = curves[(size_t) (linked ? 0 : ch)];
+        // Fan the painted edit-band curves onto the analysis bins. Each matrix
+        // resolves its own source channel (its Link makes both use the L set)
+        // and applies its offsets: X (param + LFO) shifts every point's value,
+        // Y (LFO) shifts the curve along the frequency axis in edit bands.
+        auto curveVal = [&] (int m, int band)
+        {
+            if (mtxBypass[m])
+                return m == SpectralCurves::Attenuation ? 1.0f : 0.0f;   // stage passthrough
+
+            const int mch   = mtxLink[m] ? 0 : ch;
+            const int shift = (int) std::lround (lfoY[m][mch] * (float) (SpectralCurves::numEditBands / 4));
+            band = juce::jlimit (0, SpectralCurves::numEditBands - 1, band + shift);
+            return juce::jlimit (0.0f, 1.0f,
+                                 curves[(size_t) mch].get (m, band) + offX[m] + lfoX[m][mch]);
+        };
+
         for (int b = 0; b < SpectralDelay::maxBins; ++b)
         {
-            int band = binToEditBand (juce::jmin (b, activeBins - 1), activeBins, maskIdx) + matrixXshift;
-            band = juce::jlimit (0, SpectralCurves::numEditBands - 1, band);
+            const int band = binToEditBand (juce::jmin (b, activeBins - 1), activeBins, maskIdx);
 
-            auto curveVal = [&] (int matrix)
-            {
-                return juce::jlimit (0.0f, 1.0f, src.get (matrix, band) + matrixYoff);
-            };
+            // Curve bottom is a true zero multiplier (full cut), top is unity.
+            gainCurve[(size_t) b]     = curveVal (SpectralCurves::Attenuation, band);
+            feedbackCurve[(size_t) b] = curveVal (SpectralCurves::Feedback,    band);
 
-            gainCurve[(size_t) b]     = masterAttenGain * curveVal (SpectralCurves::Attenuation);
-            feedbackCurve[(size_t) b] = feedback        * curveVal (SpectralCurves::Feedback);
-
-            float delaySeconds = masterDelaySeconds * curveVal (SpectralCurves::Delay);
+            float delaySeconds = maxDelaySeconds * curveVal (SpectralCurves::Delay, band);
             if (gridSeconds > 0.0f)
                 delaySeconds = std::round (delaySeconds / gridSeconds) * gridSeconds;
             delayCurve[(size_t) b] = delaySeconds;
@@ -516,9 +542,15 @@ void FFTDelayAudioProcessor::setCurrentProgram (int index)                    { 
 const juce::String FFTDelayAudioProcessor::getProgramName (int index)         { juce::ignoreUnused (index); return {}; }
 void FFTDelayAudioProcessor::changeProgramName (int index, const juce::String& newName) { juce::ignoreUnused (index, newName); }
 
+// Bump when the parameter surface changes incompatibly; setStateInformation
+// migrates older states. v2: curves became the sole value source (the global
+// delay/feedback/attenuation scalers were removed and baked into the curves).
+static constexpr int kStateVersion = 2;
+
 void FFTDelayAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     auto state = apvts.copyState();
+    state.setProperty ("stateVersion", kStateVersion, nullptr);
 
     // Stash the painted matrices (both channels) alongside the parameters.
     state.removeChild (state.getChildWithName ("CURVES"), nullptr);
@@ -582,6 +614,28 @@ void FFTDelayAudioProcessor::setStateInformation (const void* data, int sizeInBy
                         auto tokens = juce::StringArray::fromTokens (prop.toString(), " ", "");
                         for (int b = 0; b < juce::jmin (tokens.size(), SpectralCurves::numEditBands); ++b)
                             curves[(size_t) ch].set (m, b, tokens[b].getFloatValue());
+                    }
+            }
+
+            // One-shot migration for pre-v2 states: the curves were multipliers
+            // on global delay/feedback/attenuation scalers. Bake those scalers
+            // into the curves so old sessions keep their sound.
+            if ((int) tree.getProperty ("stateVersion", 1) < 2)
+            {
+                auto oldParam = [&tree] (const juce::String& id, float fallback)
+                {
+                    auto p = tree.getChildWithProperty ("id", id);
+                    return p.isValid() ? (float) p.getProperty ("value", fallback) : fallback;
+                };
+                const float dly = oldParam ("delayTime", 0.1f);
+                const float fb  = oldParam ("feedback", 0.3f);
+                const float att = juce::Decibels::decibelsToGain (oldParam ("attenuation", 0.0f));
+                for (auto& c : curves)
+                    for (int b = 0; b < SpectralCurves::numEditBands; ++b)
+                    {
+                        c.set (SpectralCurves::Delay,       b, c.get (SpectralCurves::Delay, b) * dly);
+                        c.set (SpectralCurves::Feedback,    b, c.get (SpectralCurves::Feedback, b) * fb);
+                        c.set (SpectralCurves::Attenuation, b, c.get (SpectralCurves::Attenuation, b) * att);
                     }
             }
 

@@ -53,8 +53,8 @@ public:
     std::atomic<int> displayBins { 0 };
 
     // The three painted matrices, one independent set per channel (L = 0, R = 1).
-    // The editor draws into these; processBlock reads them. When the "link"
-    // parameter is on, both channels are driven from the L set.
+    // The editor draws into these; processBlock reads them. Each matrix has its
+    // own L/R link parameter; when linked, both channels use the L set.
     std::array<SpectralCurves, 2> curves;
 
     // On-disk presets (save/recall + next/previous). Constructed after apvts so

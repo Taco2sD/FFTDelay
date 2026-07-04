@@ -270,8 +270,8 @@ void MatrixEditor::mouseDrag (const juce::MouseEvent& e)
 
 void MatrixEditor::mouseDoubleClick (const juce::MouseEvent&)
 {
-    curves->fill (matrix, 1.0f);
-    if (mirror != nullptr) mirror->fill (matrix, 1.0f);
+    curves->fill (matrix, SpectralCurves::defaultFor (matrix));
+    if (mirror != nullptr) mirror->fill (matrix, SpectralCurves::defaultFor (matrix));
     repaint();
 }
 
@@ -335,11 +335,11 @@ FFTDelayAudioProcessorEditor::FFTDelayAudioProcessorEditor (FFTDelayAudioProcess
             matrixEditors.push_back (std::move (e));
         }
 
-    addKnob ("dryWet",      "Dry/Wet");
-    addKnob ("effectGain",  "Effect Gain");
-    addKnob ("delayTime",   "Delay");
-    addKnob ("feedback",    "Feedback");
-    addKnob ("attenuation", "Attenuation");
+    addKnob ("dryWet",     "Dry/Wet");
+    addKnob ("effectGain", "Effect Gain");
+    addKnob ("attOffX",    "Att Offs");
+    addKnob ("delayOffX",  "Dly Offs");
+    addKnob ("fbOffX",     "FB Offs");
 
     addKnob ("lfoRate",   "LFO Rate");
     addKnob ("lfoDepth1", "LFO Dpt 1");
@@ -374,10 +374,17 @@ FFTDelayAudioProcessorEditor::FFTDelayAudioProcessorEditor (FFTDelayAudioProcess
     addToggle ("lfoOn",        "LFO On");
     addToggle ("lfoSync",      "LFO Sync");
     addToggle ("imLink",       "IM Link");
+    addToggle ("imBypass",     "IM Byp");
+    addToggle ("attBypass",    "Att Byp");
+    addToggle ("delayBypass",  "Dly Byp");
+    addToggle ("fbBypass",     "FB Byp");
 
-    // Link L/R: when toggled, set/clear edit mirroring so both columns stay in sync.
-    auto& link = addToggle ("link", "Link L/R");
-    link.button.onClick = [this] { updateLinkMirrors(); };
+    // Per-matrix L/R links: each re-arms edit mirroring for its own row pair.
+    for (const auto* id : { "attLink", "delayLink", "fbLink" })
+    {
+        auto& link = addToggle (id, juce::String (id).replace ("Link", " Link").toUpperCase());
+        link.button.onClick = [this] { updateLinkMirrors(); };
+    }
 
     // Copy buttons (both channels are always visible).
     copyLtoR.onClick = [this]
@@ -533,22 +540,26 @@ void FFTDelayAudioProcessorEditor::repaintMatrices()
 
 void FFTDelayAudioProcessorEditor::updateLinkMirrors()
 {
-    const bool linked = processorRef.apvts.getRawParameterValue ("link")->load() > 0.5f;
-
-    // When linked, an edit in either column mirrors to the other so L and R stay
-    // identical (and the engine drives both from the L set). matrixEditors index:
-    // 0..2 = L (Atten/Delay/Feedback), 3..5 = R.
+    // Each matrix has its own L/R link. When linked, an edit in either column
+    // mirrors to the other so L and R stay identical (and the engine drives both
+    // from the L set). matrixEditors index: 0..2 = L (Att/Dly/FB), 3..5 = R;
+    // editor i edits matrix (i % 3).
+    static const char* linkIds[] = { "attLink", "delayLink", "fbLink" };
+    bool anyLinked = false;
     for (int i = 0; i < (int) matrixEditors.size(); ++i)
     {
-        const int otherChannelBase = i < 3 ? 1 : 0;   // L mirrors to R-set, R mirrors to L-set
-        matrixEditors[(size_t) i]->setMirror (linked ? &processorRef.curves[(size_t) otherChannelBase]
+        const int  m      = i % 3;
+        const bool linked = processorRef.apvts.getRawParameterValue (linkIds[m])->load() > 0.5f;
+        anyLinked |= linked;
+        const int otherChannel = i < 3 ? 1 : 0;   // L mirrors to R-set, R mirrors to L-set
+        matrixEditors[(size_t) i]->setMirror (linked ? &processorRef.curves[(size_t) otherChannel]
                                                      : nullptr);
     }
 
-    // Copy direction that would be overwritten by linked mirroring is less useful,
-    // but keep both enabled; they simply no-op into identical data when linked.
-    copyLtoR.setEnabled (! linked);
-    copyRtoL.setEnabled (! linked);
+    // Copying is only meaningful for unlinked matrices; keep buttons enabled
+    // unless everything is linked (then they'd be pure no-ops).
+    copyLtoR.setEnabled (! anyLinked);
+    copyRtoL.setEnabled (! anyLinked);
     repaintMatrices();
 }
 

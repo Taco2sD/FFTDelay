@@ -16,15 +16,20 @@ struct SpectralCurves
 
     enum Matrix { Attenuation = 0, Delay = 1, Feedback = 2, numMatrices = 3 };
 
-    // All curves default to 1.0 (a flat "do nothing" multiplier on the master
-    // knobs), so an untouched plugin behaves exactly like the global controls.
+    // The curves ARE the parameters (there are no global delay/feedback/gain
+    // knobs behind them). A fresh instance is a clean passthrough: Attenuation
+    // flat at unity, Delay and Feedback flat at zero.
     SpectralCurves() { reset(); }
+
+    static constexpr float defaultFor (int matrix) noexcept
+    {
+        return matrix == Attenuation ? 1.0f : 0.0f;
+    }
 
     void reset() noexcept
     {
-        for (auto& matrix : values)
-            for (auto& point : matrix)
-                point.store (1.0f, std::memory_order_relaxed);
+        for (int m = 0; m < numMatrices; ++m)
+            fill (m, defaultFor (m));
     }
 
     float get (int matrix, int band) const noexcept

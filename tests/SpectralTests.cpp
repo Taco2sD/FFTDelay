@@ -22,10 +22,10 @@ struct SpectralCurvesTests : juce::UnitTest
     {
         SpectralCurves c;
 
-        beginTest ("defaults to unity (1.0) everywhere");
+        beginTest ("defaults: attenuation unity, delay and feedback zero");
         for (int m = 0; m < SpectralCurves::numMatrices; ++m)
             for (int b = 0; b < SpectralCurves::numEditBands; ++b)
-                expectEquals (c.get (m, b), 1.0f);
+                expectEquals (c.get (m, b), SpectralCurves::defaultFor (m));
 
         beginTest ("set / get round-trips");
         c.set (SpectralCurves::Delay, 10, 0.25f);
