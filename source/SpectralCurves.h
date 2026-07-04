@@ -89,13 +89,18 @@ struct SpectralCurves
             point.store (v, std::memory_order_relaxed);
     }
 
-    // Copy every point from another curve set (atomics aren't copyable directly).
-    // Used by the stereo Copy-Up / Copy-Down controls.
+    // Copy points from another curve set (atomics aren't copyable directly):
+    // one matrix, or all three. Used by the per-column stereo copy controls.
+    void copyMatrixFrom (const SpectralCurves& other, int matrix) noexcept
+    {
+        for (int b = 0; b < numEditBands; ++b)
+            values[(size_t) matrix][(size_t) b].store (other.get (matrix, b), std::memory_order_relaxed);
+    }
+
     void copyFrom (const SpectralCurves& other) noexcept
     {
         for (int m = 0; m < numMatrices; ++m)
-            for (int b = 0; b < numEditBands; ++b)
-                values[(size_t) m][(size_t) b].store (other.get (m, b), std::memory_order_relaxed);
+            copyMatrixFrom (other, m);
     }
 
     // One pass of a 3-tap smoothing kernel — the "Smooth (Smth)" control, which

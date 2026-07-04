@@ -161,9 +161,16 @@ private:
     juce::TextButton smoothButton { "Smooth" };
     juce::TextButton resetButton  { "Reset Dly" };
 
-    // Stereo copy controls (both channels are always visible now).
-    juce::TextButton copyLtoR { "Copy L->R" };
-    juce::TextButton copyRtoL { "Copy R->L" };
+    // The graph-control strip sits between the L (top) and R (bottom) matrix
+    // rows: one cluster per matrix column with its stage Bypass [B], stereo
+    // Link [L], copy L->R [v] / R->L [^], and the column's CAPS caption.
+    struct MatrixCluster
+    {
+        juce::Label      caption;
+        juce::TextButton bypass { "B" }, link { "L" }, copyDown { "v" }, copyUp { "^" };
+        std::unique_ptr<APVTS::ButtonAttachment> bypassAttachment, linkAttachment;
+    };
+    std::array<MatrixCluster, SpectralCurves::numMatrices> clusters;
 
     void updateLinkMirrors();   // set/clear L<->R edit mirroring from the Link state
     void repaintMatrices();

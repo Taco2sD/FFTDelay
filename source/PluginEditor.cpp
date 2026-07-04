@@ -412,30 +412,43 @@ FFTDelayAudioProcessorEditor::FFTDelayAudioProcessorEditor (FFTDelayAudioProcess
     addToggle ("imBypass",     "IM Byp");
     addToggle ("zeroDelayOnProgram", "0Dly Prg");
     addToggle ("ignoreMidiReset",    "No M-Rst");
-    addToggle ("attBypass",    "Att Byp");
-    addToggle ("delayBypass",  "Dly Byp");
-    addToggle ("fbBypass",     "FB Byp");
 
-    // Per-matrix L/R links: each re-arms edit mirroring for its own row pair.
-    for (const auto* id : { "attLink", "delayLink", "fbLink" })
+    // Graph-control strip clusters: per-matrix Bypass/Link (parameters) and the
+    // per-column stereo copies (actions), beside the column's CAPS caption.
+    static const char* stripCaptions[] = { "FILTER", "FREQUENCY", "FEEDBACK" };
+    static const char* stripParamIds[] = { "att", "delay", "fb" };
+    for (int m = 0; m < SpectralCurves::numMatrices; ++m)
     {
-        auto& link = addToggle (id, juce::String (id).replace ("Link", " Link").toUpperCase());
-        link.button.onClick = [this] { updateLinkMirrors(); };
+        auto& c = clusters[(size_t) m];
+        const juce::String id (stripParamIds[m]);
+
+        c.caption.setText (stripCaptions[m], juce::dontSendNotification);
+        c.caption.setColour (juce::Label::textColourId, theme::accentFor (m));
+        c.caption.setFont (theme::label());
+        addAndMakeVisible (c.caption);
+
+        for (auto* b : { &c.bypass, &c.link })
+            b->setClickingTogglesState (true);
+        c.bypassAttachment = std::make_unique<APVTS::ButtonAttachment> (processorRef.apvts, id + "Bypass", c.bypass);
+        c.linkAttachment   = std::make_unique<APVTS::ButtonAttachment> (processorRef.apvts, id + "Link",   c.link);
+        registerParamLearn (c.bypass, id + "Bypass");
+        registerParamLearn (c.link,   id + "Link");
+        c.link.onClick = [this] { updateLinkMirrors(); };
+
+        c.copyDown.onClick = [this, m]
+        {
+            processorRef.curves[1].copyMatrixFrom (processorRef.curves[0], m);
+            repaintMatrices();
+        };
+        c.copyUp.onClick = [this, m]
+        {
+            processorRef.curves[0].copyMatrixFrom (processorRef.curves[1], m);
+            repaintMatrices();
+        };
+
+        for (auto* b : { &c.bypass, &c.link, &c.copyDown, &c.copyUp })
+            addAndMakeVisible (*b);
     }
-
-    // Copy buttons (both channels are always visible).
-    copyLtoR.onClick = [this]
-    {
-        processorRef.curves[1].copyFrom (processorRef.curves[0]);
-        repaintMatrices();
-    };
-    copyRtoL.onClick = [this]
-    {
-        processorRef.curves[0].copyFrom (processorRef.curves[1]);
-        repaintMatrices();
-    };
-    addAndMakeVisible (copyLtoR);
-    addAndMakeVisible (copyRtoL);
 
     // Smooth smears both channels' matrices a little more per click.
     smoothButton.onClick = [this]
@@ -585,21 +598,18 @@ void FFTDelayAudioProcessorEditor::updateLinkMirrors()
     // from the L set). matrixEditors index: 0..2 = L (Att/Dly/FB), 3..5 = R;
     // editor i edits matrix (i % 3).
     static const char* linkIds[] = { "attLink", "delayLink", "fbLink" };
-    bool anyLinked = false;
     for (int i = 0; i < (int) matrixEditors.size(); ++i)
     {
         const int  m      = i % 3;
         const bool linked = processorRef.apvts.getRawParameterValue (linkIds[m])->load() > 0.5f;
-        anyLinked |= linked;
         const int otherChannel = i < 3 ? 1 : 0;   // L mirrors to R-set, R mirrors to L-set
         matrixEditors[(size_t) i]->setMirror (linked ? &processorRef.curves[(size_t) otherChannel]
                                                      : nullptr);
-    }
 
-    // Copying is only meaningful for unlinked matrices; keep buttons enabled
-    // unless everything is linked (then they'd be pure no-ops).
-    copyLtoR.setEnabled (! anyLinked);
-    copyRtoL.setEnabled (! anyLinked);
+        // Copies are no-ops while that column is linked (the sets are identical).
+        clusters[(size_t) m].copyDown.setEnabled (! linked);
+        clusters[(size_t) m].copyUp.setEnabled (! linked);
+    }
     repaintMatrices();
 }
 
@@ -747,12 +757,6 @@ void FFTDelayAudioProcessorEditor::resized()
     midiButton.setBounds       (presetBar.removeFromLeft (76).reduced (4, 0));
     area.removeFromTop (6);
 
-    // Stereo copy bar.
-    auto stereoBar = area.removeFromTop (26);
-    copyLtoR.setBounds (stereoBar.removeFromLeft (110).reduced (4, 0));
-    copyRtoL.setBounds (stereoBar.removeFromLeft (110).reduced (4, 0));
-    area.removeFromTop (6);
-
     // Control grids grow downward; the matrix editors take the space that's left
     // above them. Compute the grid heights first, then give matrices the rest.
     const int areaW = area.getWidth();
@@ -772,18 +776,39 @@ void FFTDelayAudioProcessorEditor::resized()
 
     const int gridsH = knobRows * knobCellH + 6 + chRows * chCellH + 6 + tgRows * tgCellH;
 
-    // Matrices fill everything above the control grids (min 240px). Two columns
-    // (L | R) of three rows (Attenuation / Delay / Feedback). matrixEditors index:
-    // 0..2 = L, 3..5 = R.
-    auto matrixArea = area.removeFromTop (juce::jmax (240, area.getHeight() - gridsH - 14));
-    const int colW = matrixArea.getWidth() / 2;
-    auto leftCol  = matrixArea.removeFromLeft (colW).reduced (2, 0);
-    auto rightCol = matrixArea.reduced (2, 0);
-    const int rowH = leftCol.getHeight() / 3;
-    for (int row = 0; row < 3; ++row)
+    // The matrix field: three matrix columns (Attenuation | Delay | Feedback,
+    // the Delay column widest), with the LEFT channel as the top row, the RIGHT
+    // channel as the bottom row, and the graph-control strip between them.
+    // matrixEditors index: 0..2 = L (Att/Dly/FB), 3..5 = R.
+    auto matrixArea = area.removeFromTop (juce::jmax (280, area.getHeight() - gridsH - 14));
+    constexpr float colWeights[] = { 1.6f, 3.6f, 1.6f };
+    constexpr int   stripH = 40, colGap = 6;
+
+    const float weightSum  = colWeights[0] + colWeights[1] + colWeights[2];
+    const int   rowH       = (matrixArea.getHeight() - stripH) / 2;
+    auto topRow    = matrixArea.removeFromTop (rowH);
+    auto stripArea = matrixArea.removeFromTop (stripH);
+    auto bottomRow = matrixArea;
+
+    for (int m = 0; m < SpectralCurves::numMatrices; ++m)
     {
-        matrixEditors[(size_t) row]    ->setBounds (leftCol.removeFromTop (rowH).reduced (0, 3));
-        matrixEditors[(size_t) row + 3]->setBounds (rightCol.removeFromTop (rowH).reduced (0, 3));
+        const int w = (int) ((float) area.getWidth() * colWeights[m] / weightSum);
+        auto top    = topRow.removeFromLeft (w);
+        auto strip  = stripArea.removeFromLeft (w);
+        auto bottom = bottomRow.removeFromLeft (w);
+
+        matrixEditors[(size_t) m]    ->setBounds (top.reduced (colGap / 2, 3));
+        matrixEditors[(size_t) m + 3]->setBounds (bottom.reduced (colGap / 2, 3));
+
+        // Cluster: caption left, then the 16 px B / L / v / ^ micro-buttons.
+        auto& c = clusters[(size_t) m];
+        strip.reduce (colGap / 2 + 4, (stripH - 16) / 2);
+        c.caption.setBounds (strip.removeFromLeft (juce::jmax (60, strip.getWidth() - 4 * 20)));
+        for (auto* btn : { &c.bypass, &c.link, &c.copyDown, &c.copyUp })
+        {
+            btn->setBounds (strip.removeFromLeft (16));
+            strip.removeFromLeft (4);
+        }
     }
     area.removeFromTop (8);
 
