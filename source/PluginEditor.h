@@ -190,6 +190,15 @@ private:
     // Declared first so it outlives every child component that references it.
     SpectralLookAndFeel lookAndFeel;
 
+    // Free resizing: every control lives on this fixed-size logical canvas,
+    // which resized() scales as a whole - crisp vectors at any window size.
+    // The shadowing helper below reroutes the constructor's addAndMakeVisible
+    // calls onto the canvas, so child components never deal with scaling.
+    static constexpr int logicalW = 1200, logicalH = 960;
+    juce::Component content;
+    void addAndMakeVisible (juce::Component& c) { content.addAndMakeVisible (c); }
+    void layoutContent();   // lays out the logical canvas (called from resized)
+
     // Six matrix editors: a left column (channel 0) and right column (channel 1),
     // each Attenuation / Delay / Feedback. Both channels visible at once.
     std::vector<std::unique_ptr<MatrixEditor>> matrixEditors;

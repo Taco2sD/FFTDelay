@@ -422,6 +422,11 @@ FFTDelayAudioProcessorEditor::FFTDelayAudioProcessorEditor (FFTDelayAudioProcess
 {
     setLookAndFeel (&lookAndFeel);
 
+    // The logical canvas everything else parents onto (see the shadowing
+    // addAndMakeVisible helper in the header). Base call: this one child really
+    // does belong to the editor itself.
+    juce::Component::addAndMakeVisible (content);
+
     // Six matrix editors: left column = channel 0 (L), right column = channel 1 (R),
     // each tinted with its matrix's accent from the theme.
     static const char* matrixNames[] = { "Attenuation", "Delay", "Feedback" };
@@ -597,7 +602,13 @@ FFTDelayAudioProcessorEditor::FFTDelayAudioProcessorEditor (FFTDelayAudioProcess
     refreshPresetBox();
     updateLinkMirrors();
     startTimerHz (6);     // keep the IM knob labels in sync with the selected algorithm
-    setSize (1200, 960);
+
+    // Free vector resizing: the window scales the logical canvas uniformly.
+    setResizable (true, true);
+    setResizeLimits (logicalW * 3 / 4, logicalH * 3 / 4, logicalW * 2, logicalH * 2);
+    if (auto* constrainer = getConstrainer())
+        constrainer->setFixedAspectRatio ((double) logicalW / (double) logicalH);
+    setSize (logicalW, logicalH);
 }
 
 FFTDelayAudioProcessorEditor::~FFTDelayAudioProcessorEditor()
@@ -817,6 +828,12 @@ void FFTDelayAudioProcessorEditor::paint (juce::Graphics& g)
 {
     g.fillAll (theme::colour (theme::bgApp));
 
+    // Chrome is drawn in logical-canvas coordinates under the (transformed)
+    // content, so it scales in lockstep with the controls.
+    g.addTransform (juce::AffineTransform::scale (
+        juce::jmin ((float) getWidth()  / (float) logicalW,
+                    (float) getHeight() / (float) logicalH)));
+
     // Section-card chrome: panel body, header strip, hairline, CAPS title.
     static const char* cardTitles[numCards] = { "GLOBAL", "EDIT", "LFO", "ANALYSIS", "INPUT MOD" };
     for (int i = 0; i < numCards; ++i)
@@ -838,13 +855,25 @@ void FFTDelayAudioProcessorEditor::paint (juce::Graphics& g)
 
     g.setColour (theme::colour (theme::textPrimary));
     g.setFont (theme::header());
-    g.drawText ("FFTDELAY", getLocalBounds().reduced (12).removeFromTop (22),
+    g.drawText ("FFTDELAY",
+                juce::Rectangle<int> (0, 0, logicalW, logicalH).reduced (12).removeFromTop (22),
                 juce::Justification::centredLeft);
 }
 
 void FFTDelayAudioProcessorEditor::resized()
 {
-    auto area = getLocalBounds().reduced (12);
+    // Uniform vector scale: the canvas keeps its logical size and the whole
+    // tree is transformed to fill the window.
+    const float scale = juce::jmin ((float) getWidth()  / (float) logicalW,
+                                    (float) getHeight() / (float) logicalH);
+    content.setTransform (juce::AffineTransform::scale (scale));
+    content.setBounds (0, 0, logicalW, logicalH);
+    layoutContent();
+}
+
+void FFTDelayAudioProcessorEditor::layoutContent()
+{
+    auto area = juce::Rectangle<int> (0, 0, logicalW, logicalH).reduced (12);
     area.removeFromTop (24);   // title strip
 
     // Card helpers: each card owns a header strip; controls fill the interior.
