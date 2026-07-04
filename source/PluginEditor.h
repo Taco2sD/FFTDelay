@@ -141,9 +141,10 @@ private:
     // each Attenuation / Delay / Feedback. Both channels visible at once.
     std::vector<std::unique_ptr<MatrixEditor>> matrixEditors;
 
-    // Smooth (Smth): an action, not a stored parameter — each click smears the
-    // matrices a little more.
+    // Actions (not stored parameters): Smooth smears the matrices a little more
+    // per click; Reset clears all delay memory at the next audio block.
     juce::TextButton smoothButton { "Smooth" };
+    juce::TextButton resetButton  { "Reset Dly" };
 
     // Stereo copy controls (both channels are always visible now).
     juce::TextButton copyLtoR { "Copy L->R" };

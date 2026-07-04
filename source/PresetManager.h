@@ -1,6 +1,7 @@
 #pragma once
 
 #include <juce_audio_processors/juce_audio_processors.h>
+#include <functional>
 
 // A small on-disk preset system: each preset is the processor's full saved state
 // (parameters + painted matrices) written to a file under the user's documents.
@@ -61,8 +62,13 @@ public:
         {
             processor.setStateInformation (mb.getData(), (int) mb.getSize());
             currentIndex = presets.indexOf (name);
+            if (onPresetLoaded)
+                onPresetLoaded();
         }
     }
+
+    // Fired after a preset is recalled (used to optionally clear delay memory).
+    std::function<void()> onPresetLoaded;
 
     void loadIndex (int i)
     {

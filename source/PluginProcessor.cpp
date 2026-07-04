@@ -9,6 +9,42 @@ FFTDelayAudioProcessor::FFTDelayAudioProcessor()
       apvts (*this, nullptr, "PARAMETERS", createParameterLayout())
 {
     createFactoryPresets();
+
+    // Optionally start each recalled preset with clean delay memory.
+    presetManager.onPresetLoaded = [this]
+    {
+        if (apvts.getRawParameterValue ("zeroDelayOnProgram")->load() > 0.5f)
+            requestEngineReset();
+    };
+
+    // Fresh instances (no assignments yet) get the factory CC map; a loaded
+    // session/preset restores its own map over this in setStateInformation.
+    bool anyAssigned = false;
+    for (int cc = 0; cc < MidiLearnManager::numCC && ! anyAssigned; ++cc)
+        anyAssigned = midiLearn.target[(size_t) cc].load() != MidiLearnManager::noTarget;
+    if (! anyAssigned)
+        applyFactoryMidiMap();
+}
+
+void FFTDelayAudioProcessor::applyFactoryMidiMap()
+{
+    midiLearn.clearAll();
+
+    auto bind = [this] (int cc, const char* paramId)
+    {
+        if (auto* p = apvts.getParameter (paramId))
+            midiLearn.bind (cc, p->getParameterIndex());
+    };
+
+    bind (1, "lfoRate");
+    bind (2, "lfoDepth1");  bind (3, "lfoDepth2");  bind (4, "lfoDepth3");
+    bind (5, "lfoOn");
+    bind (8, "lfoDest1");   bind (9, "lfoDest2");   bind (10, "lfoDest3");
+    bind (11, "lfoWave");
+    bind (64, "freeze");
+    bind (66, "imCtrl1");   bind (67, "imCtrl2");   bind (68, "imCtrl3");
+    bind (69, "imCtrl1R");  bind (70, "imCtrl2R");  bind (71, "imCtrl3R");
+    bind (72, "attOffX");   bind (73, "delayOffX"); bind (74, "fbOffX");
 }
 
 void FFTDelayAudioProcessor::createFactoryPresets()
@@ -115,6 +151,12 @@ FFTDelayAudioProcessor::createParameterLayout()
 
     // When on, the grid tracks live host tempo; off uses a fixed 120 BPM reference.
     layout.add (std::make_unique<BoolParam>(juce::ParameterID { "autoQuantize", 1 }, "Auto Quant", true));
+
+    // --- Housekeeping options --------------------------------------------------
+    // Clear delay memory when a preset is recalled / when MIDI system-reset
+    // arrives, so stale echoes never bleed into new material.
+    layout.add (std::make_unique<BoolParam>(juce::ParameterID { "zeroDelayOnProgram", 1 }, "Zero Dly on Prg", true));
+    layout.add (std::make_unique<BoolParam>(juce::ParameterID { "ignoreMidiReset",    1 }, "Ignore MIDI Rst", false));
 
     // --- Spectral analysis (FFT) ---------------------------------------------
     // Choices are BAND counts (frame = 2 x bands): 64 bands = FFT 128 ... 1024
@@ -244,6 +286,12 @@ void FFTDelayAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 {
     juce::ScopedNoDenormals noDenormals;
 
+    // A requested reset (button, preset recall, MIDI reset) clears all delay
+    // memory here, on the audio thread, where the engines are owned.
+    if (engineResetPending.exchange (false))
+        for (auto& sd : spectralDelays)
+            sd.reset();
+
     // Clear any output channels that don't have a matching input.
     for (auto i = getTotalNumInputChannels(); i < getTotalNumOutputChannels(); ++i)
         buffer.clear (i, 0, buffer.getNumSamples());
@@ -253,6 +301,15 @@ void FFTDelayAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     for (const auto metadata : midiMessages)
     {
         const auto msg = metadata.getMessage();
+
+        // MIDI system reset (0xFF) clears delay memory unless the option says not to.
+        if (msg.getRawDataSize() == 1 && msg.getRawData()[0] == 0xff
+            && apvts.getRawParameterValue ("ignoreMidiReset")->load() < 0.5f)
+        {
+            engineResetPending.store (true);
+            continue;
+        }
+
         if (! msg.isController())
             continue;
 

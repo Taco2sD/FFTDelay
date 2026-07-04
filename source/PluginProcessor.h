@@ -64,6 +64,15 @@ public:
     // MIDI Learn: every parameter + preset Next/Prev are CC-assignable.
     MidiLearnManager midiLearn;
 
+    // Bind the factory CC map (LFO, freeze, input-mod and offset controls) on
+    // top of MIDI Learn. Called automatically for fresh instances; callable
+    // again from the UI to restore the defaults.
+    void applyFactoryMidiMap();
+
+    // Ask the audio thread to clear all delay memory at the next block start
+    // (the reset itself must happen there for thread safety).
+    void requestEngineReset() noexcept { engineResetPending.store (true); }
+
     // MIDI-triggered preset navigation is deferred to the message thread (preset
     // I/O is not realtime safe) via AsyncUpdater. The editor sets the callback so
     // it can refresh its UI after a MIDI-driven preset change.
@@ -95,6 +104,9 @@ private:
     double   lfoPhase  = 0.0;   // [0, 1)
     float    lfoRandom = 0.0f;  // held value for the Random / S&H waveform
     uint32_t lfoRng    = 0x12345678u;
+
+    // Set by requestEngineReset(); consumed at the next processBlock start.
+    std::atomic<bool> engineResetPending { false };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (FFTDelayAudioProcessor)
 };

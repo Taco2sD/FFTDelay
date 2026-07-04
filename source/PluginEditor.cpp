@@ -375,6 +375,8 @@ FFTDelayAudioProcessorEditor::FFTDelayAudioProcessorEditor (FFTDelayAudioProcess
     addToggle ("lfoSync",      "LFO Sync");
     addToggle ("imLink",       "IM Link");
     addToggle ("imBypass",     "IM Byp");
+    addToggle ("zeroDelayOnProgram", "0Dly Prg");
+    addToggle ("ignoreMidiReset",    "No M-Rst");
     addToggle ("attBypass",    "Att Byp");
     addToggle ("delayBypass",  "Dly Byp");
     addToggle ("fbBypass",     "FB Byp");
@@ -409,6 +411,9 @@ FFTDelayAudioProcessorEditor::FFTDelayAudioProcessorEditor (FFTDelayAudioProcess
         repaintMatrices();
     };
     addAndMakeVisible (smoothButton);
+
+    resetButton.onClick = [this] { processorRef.requestEngineReset(); };
+    addAndMakeVisible (resetButton);
 
     // Preset bar.
     presetBox.setTextWhenNothingSelected ("Init");
@@ -728,7 +733,7 @@ void FFTDelayAudioProcessorEditor::resized()
 
     const int knobRows = ((int) knobs.size()   + knobCols - 1) / knobCols;
     const int chRows   = ((int) choices.size() + chCols   - 1) / chCols;
-    const int tgRows   = ((int) toggles.size() + 1 + tgCols - 1) / tgCols;
+    const int tgRows   = ((int) toggles.size() + 2 + tgCols - 1) / tgCols;
 
     const int gridsH = knobRows * knobCellH + 6 + chRows * chCellH + 6 + tgRows * tgCellH;
 
@@ -772,15 +777,16 @@ void FFTDelayAudioProcessorEditor::resized()
     }
     area.removeFromTop (6);
 
-    // Toggles grid (+ Smooth as the final cell).
+    // Toggles grid (+ the Smooth and Reset action buttons as final cells).
     auto tgArea = area.removeFromTop (tgRows * tgCellH);
-    for (int i = 0; i <= (int) toggles.size(); ++i)   // last index = smoothButton
+    for (int i = 0; i <= (int) toggles.size() + 1; ++i)
     {
         juce::Rectangle<int> cell (tgArea.getX() + (i % tgCols) * tgCellW,
                                    tgArea.getY() + (i / tgCols) * tgCellH,
                                    tgCellW, tgCellH);
         cell.reduce (6, 2);
-        if (i < (int) toggles.size()) toggles[(size_t) i]->button.setBounds (cell);
-        else                          smoothButton.setBounds (cell);
+        if      (i < (int) toggles.size())  toggles[(size_t) i]->button.setBounds (cell);
+        else if (i == (int) toggles.size()) smoothButton.setBounds (cell);
+        else                                resetButton.setBounds (cell);
     }
 }
