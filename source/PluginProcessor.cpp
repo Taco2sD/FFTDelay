@@ -117,9 +117,11 @@ FFTDelayAudioProcessor::createParameterLayout()
     layout.add (std::make_unique<BoolParam>(juce::ParameterID { "autoQuantize", 1 }, "Auto Quant", true));
 
     // --- Spectral analysis (FFT) ---------------------------------------------
+    // Choices are BAND counts (frame = 2 x bands): 64 bands = FFT 128 ... 1024
+    // bands = FFT 2048. Index maps to SpectralDelay::minFftOrder + idx.
     layout.add (std::make_unique<ChoiceParam>(
         juce::ParameterID { "fftSize", 1 }, "Bands",
-        juce::StringArray { "64", "128", "256", "512", "1024" }, 4));
+        juce::StringArray { "64", "128", "256", "512", "1024" }, 3));
 
     // Hop = frame / (overlap + 1); 0x deliberately breaks perfect reconstruction.
     layout.add (std::make_unique<ChoiceParam>(

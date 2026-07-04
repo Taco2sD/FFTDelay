@@ -10,11 +10,23 @@ void SpectralDelay::prepare (double sampleRate)
     for (int order = minFftOrder; order <= maxFftOrder; ++order)
         ffts[(size_t) order] = std::make_unique<juce::dsp::FFT> (order);
 
-    spectralRing.assign ((size_t) numFramesMax * maxFrameSize, 0.0f);
+    // Size the spectral ring pool so EVERY (FFT size, overlap) combination can
+    // hold maxDelaySeconds: frames needed scale with 1/hop, frame size with N,
+    // so the product is bounded — compute the exact worst case once.
+    size_t poolFloats = 0;
+    for (int order = minFftOrder; order <= maxFftOrder; ++order)
+        for (int ov = 0; ov <= 2; ++ov)
+        {
+            const int    n      = 1 << order;
+            const int    hop    = juce::jmax (1, n / (ov + 1));
+            const size_t frames = (size_t) std::ceil (maxDelaySeconds * sr / hop) + 2;
+            poolFloats = juce::jmax (poolFloats, frames * (size_t) (2 * n));
+        }
+    spectralRing.assign (poolFloats, 0.0f);
 
     bandGain.fill (1.0f);
     bandFeedback.fill (0.0f);
-    bandDelayFr.fill (1.0f);
+    bandDelayFr.fill (0.0f);
 
     settingsDirty = true;
     applyPendingSettings();
@@ -37,6 +49,9 @@ void SpectralDelay::reset()
     magnitudes.fill (0.0f);
     imFoamPhase  = 0.0;
     imPulsePhase = 0.0;
+
+    alignFifo.fill (0.0f);
+    alignPos = 0;
 }
 
 void SpectralDelay::setFftOrder (int order) noexcept
@@ -69,11 +84,12 @@ void SpectralDelay::setBandFeedback (const float* f) noexcept
 
 void SpectralDelay::setBandDelaySeconds (const float* seconds) noexcept
 {
-    // Convert seconds -> frames using the current hop. Clamp to a usable tap range.
+    // Convert seconds -> WHOLE frames at the current hop (spectral delays only
+    // exist in frame quanta). 0 is a genuine zero-delay passthrough tap.
     const float framesPerSecond = (float) (sr / (double) hopSize);
     for (int b = 0; b < maxBins; ++b)
-        bandDelayFr[(size_t) b] = juce::jlimit (1.0f, (float) (numFramesMax - 1),
-                                                seconds[b] * framesPerSecond);
+        bandDelayFr[(size_t) b] = juce::jlimit (0.0f, (float) (ringFrames - 1),
+                                                (float) std::lround (seconds[b] * framesPerSecond));
 }
 
 void SpectralDelay::applyPendingSettings() noexcept
@@ -98,6 +114,10 @@ void SpectralDelay::recomputeFraming() noexcept
     activeFftSize = 1 << activeOrder;
     activeFft     = ffts[(size_t) activeOrder].get();
     hopSize       = juce::jmax (1, activeFftSize / (overlap + 1));
+
+    // Reinterpret the fixed pool for this frame size (see prepare()).
+    frameStride = 2 * activeFftSize;
+    ringFrames  = juce::jmax (2, (int) (spectralRing.size() / (size_t) frameStride));
 
     const int N = activeFftSize;
     for (int i = 0; i < N; ++i)
@@ -144,7 +164,13 @@ float SpectralDelay::processSample (float input) noexcept
         processFrame();
     }
 
-    return output;
+    // Pad the frame's inherent latency (activeFftSize) up to the constant
+    // reported figure so dry/wet alignment holds at every FFT size.
+    const int pad = maxFftSize - activeFftSize;
+    alignFifo[(size_t) alignPos] = output;
+    const float aligned = alignFifo[(size_t) ((alignPos - pad + maxFftSize) % maxFftSize)];
+    alignPos = (alignPos + 1) % maxFftSize;
+    return aligned;
 }
 
 void SpectralDelay::processFrame() noexcept
@@ -173,24 +199,35 @@ void SpectralDelay::processFrame() noexcept
     }
 
     const float inputGate = frozen ? 0.0f : 1.0f;
-    float* writePtr = &spectralRing[(size_t) writeFrame * maxFrameSize];
+    float* writePtr = &spectralRing[(size_t) writeFrame * (size_t) frameStride];
 
     for (int b = 0; b <= bins; ++b)
     {
         const int idx = 2 * b;
 
-        // Delay matrix: each bin reads from its own tap offset.
-        const int df = (int) std::lround (bandDelayFr[(size_t) b]);
-        const int readFrame = (writeFrame - df + numFramesMax) % numFramesMax;
-        const float* readPtr = &spectralRing[(size_t) readFrame * maxFrameSize];
-
-        const float delRe = readPtr[(size_t) idx];
-        const float delIm = readPtr[(size_t) idx + 1];
-
-        // Attenuation matrix scales the incoming spectrum (gated when frozen).
+        // Attenuation matrix gates what ENTERS the delay network (frozen = full cut).
         const float g     = bandGain[(size_t) b] * inputGate;
         const float inRe  = fftData[(size_t) idx]     * g;
         const float inIm  = fftData[(size_t) idx + 1] * g;
+
+        // Delay matrix: each bin reads from its own tap offset. A zero tap is a
+        // straight passthrough of the attenuated input — feedback is inert there
+        // (nothing recirculates without a delay), so the write is the input alone.
+        const int df = (int) bandDelayFr[(size_t) b];
+        if (df == 0)
+        {
+            writePtr[(size_t) idx]     = inRe;
+            writePtr[(size_t) idx + 1] = inIm;
+            fftData[(size_t) idx]      = inRe;
+            fftData[(size_t) idx + 1]  = inIm;
+            continue;
+        }
+
+        const int readFrame = (writeFrame - df + ringFrames) % ringFrames;
+        const float* readPtr = &spectralRing[(size_t) readFrame * (size_t) frameStride];
+
+        const float delRe = readPtr[(size_t) idx];
+        const float delIm = readPtr[(size_t) idx + 1];
 
         // Feedback matrix: 100% when frozen so captured content sustains forever.
         const float fb = frozen ? 1.0f : bandFeedback[(size_t) b];
@@ -202,7 +239,7 @@ void SpectralDelay::processFrame() noexcept
         fftData[(size_t) idx + 1]  = delIm;
     }
 
-    writeFrame = (writeFrame + 1) % numFramesMax;
+    writeFrame = (writeFrame + 1) % ringFrames;
 
     activeFft->performRealOnlyInverseTransform (fftData.data());
 

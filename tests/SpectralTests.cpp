@@ -107,47 +107,108 @@ struct SpectralDelayTests : juce::UnitTest
         beginTest ("reported latency is the max frame size");
         expectEquals (SpectralDelay::getLatencySamples(), SpectralDelay::maxFftSize);
 
-        SpectralDelay sd;
-        sd.prepare (44100.0);
+        constexpr double sr      = 44100.0;
+        constexpr int    latency = SpectralDelay::maxFftSize;
+
+        auto engine = std::make_unique<SpectralDelay>();
+        auto& sd = *engine;
+        sd.prepare (sr);
 
         std::array<float, SpectralDelay::maxBins> gain {}, fb {}, delay {};
-        gain.fill (1.0f);
-        fb.fill (0.3f);
-        delay.fill (0.05f);
-        sd.setBandGain (gain.data());
-        sd.setBandFeedback (fb.data());
-        sd.setBandDelaySeconds (delay.data());
-        sd.applyPendingSettings();
+        auto applyCurves = [&] (float g, float f, float d)
+        {
+            gain.fill (g); fb.fill (f); delay.fill (d);
+            sd.setBandGain (gain.data());
+            sd.setBandFeedback (fb.data());
+            sd.setBandDelaySeconds (delay.data());
+        };
+
+        // Feed an impulse and return the index + value of the output peak.
+        auto impulsePeak = [&] (int numSamples)
+        {
+            sd.reset();
+            int peakIdx = 0; float peak = 0.0f;
+            for (int n = 0; n < numSamples; ++n)
+            {
+                const float out = std::abs (sd.processSample (n == 0 ? 1.0f : 0.0f));
+                if (out > peak) { peak = out; peakIdx = n; }
+            }
+            return std::pair<int, float> (peakIdx, peak);
+        };
 
         beginTest ("silence in -> silence out");
+        applyCurves (1.0f, 0.3f, 0.05f);
         bool allZero = true;
         for (int n = 0; n < 8192; ++n)
             if (sd.processSample (0.0f) != 0.0f)
                 allZero = false;
         expect (allZero);
 
-        beginTest ("impulse response stays finite and bounded");
+        beginTest ("zero-delay taps pass input straight through at constant latency");
+        applyCurves (1.0f, 0.0f, 0.0f);
+        auto [p0, v0] = impulsePeak (3 * latency);
+        expectEquals (p0, latency);
+        expect (v0 > 0.25f);
+
+        beginTest ("constant latency holds at the smallest FFT size (alignment pad)");
+        sd.setFftOrder (SpectralDelay::minFftOrder);
+        sd.applyPendingSettings();
+        applyCurves (1.0f, 0.0f, 0.0f);
+        auto [p1, v1] = impulsePeak (3 * latency);
+        expectEquals (p1, latency);
+        expect (v1 > 0.25f);
+
+        beginTest ("feedback is inert at zero delay (no recirculation)");
+        sd.setFftOrder (SpectralDelay::maxFftOrder);
+        sd.applyPendingSettings();
+        applyCurves (1.0f, 1.0f, 0.0f);
         sd.reset();
-        float maxAbs = 0.0f;
-        bool finite = true;
-        for (int n = 0; n < 44100; ++n)        // ~1 s, covers the delay + feedback tail
+        float tailEnergy = 0.0f;
+        for (int n = 0; n < 6 * latency; ++n)
         {
-            const float in  = (n == 0) ? 1.0f : 0.0f;
-            const float out = sd.processSample (in);
+            const float out = sd.processSample (n == 0 ? 1.0f : 0.0f);
+            if (n > 2 * latency)                       // well past the direct impulse
+                tailEnergy += std::abs (out);
+        }
+        expect (tailEnergy < 1.0e-3f);
+
+        beginTest ("a full-cut attenuation curve silences the wet path");
+        applyCurves (0.0f, 0.5f, 0.1f);
+        sd.reset();
+        float maxOut = 0.0f;
+        for (int n = 0; n < 22050; ++n)
+            maxOut = juce::jmax (maxOut, std::abs (sd.processSample (n == 0 ? 1.0f : 0.5f)));
+        expect (maxOut < 1.0e-9f);
+
+        beginTest ("a 12 s painted delay lands where painted (full ring capacity)");
+        sd.setFftOrder (SpectralDelay::minFftOrder);   // hop = frame at 0x: fast + worst-ish case
+        sd.setOverlap (0);
+        sd.setWindowType (3);   // Rectangle: the only window that reconstructs at 0x
+        sd.applyPendingSettings();
+        applyCurves (1.0f, 0.0f, SpectralDelay::maxDelaySeconds);
+        const int hop      = (1 << SpectralDelay::minFftOrder);
+        const int expected = latency
+                           + (int) std::lround (SpectralDelay::maxDelaySeconds * sr / hop) * hop;
+        auto [p2, v2] = impulsePeak (expected + 4 * hop);
+        expect (std::abs (p2 - expected) <= hop);
+        expect (v2 > 0.1f);
+
+        beginTest ("impulse response stays finite and bounded under feedback");
+        sd.setFftOrder (SpectralDelay::maxFftOrder);
+        sd.setOverlap (2);
+        sd.setWindowType (0);
+        sd.applyPendingSettings();
+        applyCurves (1.0f, 0.9f, 0.05f);
+        sd.reset();
+        bool finite = true; float maxAbs = 0.0f;
+        for (int n = 0; n < 44100; ++n)
+        {
+            const float out = sd.processSample (n == 0 ? 1.0f : 0.0f);
             if (! std::isfinite (out)) finite = false;
             maxAbs = juce::jmax (maxAbs, std::abs (out));
         }
         expect (finite);
-        expect (maxAbs < 100.0f);              // feedback < 1 must not blow up
-
-        beginTest ("switching FFT size stays finite (RT-safe reinit)");
-        sd.setFftOrder (SpectralDelay::minFftOrder);
-        sd.applyPendingSettings();
-        bool stillFinite = true;
-        for (int n = 0; n < 8192; ++n)
-            if (! std::isfinite (sd.processSample (0.5f)))
-                stillFinite = false;
-        expect (stillFinite);
+        expect (maxAbs < 100.0f);
     }
 };
 

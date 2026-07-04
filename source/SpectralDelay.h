@@ -55,15 +55,17 @@ public:
     // Active bin count, for mapping the processor's curves onto analysis bins.
     int getActiveNumBins() const noexcept { return activeFftSize / 2 + 1; }
 
-    static constexpr int minFftOrder = 6;             // 2^6  = 64
-    static constexpr int maxFftOrder = 10;            // 2^10 = 1024
+    static constexpr int minFftOrder = 7;             // 2^7  = 128 (64 bands)
+    static constexpr int maxFftOrder = 11;            // 2^11 = 2048 (1024 bands)
     static constexpr int maxFftSize  = 1 << maxFftOrder;
     static constexpr int maxFrameSize = 2 * maxFftSize;   // interleaved complex (re,im)
     static constexpr int maxBins     = maxFftSize / 2 + 1;
 
-    // Worst-case algorithmic latency the host should compensate for: one full
-    // max-size FFT frame. Kept constant so the reported latency never changes
-    // when the user switches FFT size.
+    static constexpr float maxDelaySeconds = 12.0f;   // ring holds this at ANY setting
+
+    // Algorithmic latency the host should compensate for, held constant across
+    // FFT-size changes: smaller frames are padded back up to this by an internal
+    // alignment delay, so the dry path never drifts against the wet path.
     static constexpr int getLatencySamples() noexcept { return maxFftSize; }
 
     // Latest analysed magnitude spectrum (per bin, ~0..1) for the UI display.
@@ -124,8 +126,17 @@ private:
 
     std::array<float, maxFrameSize> fftData {};   // scratch for one transform
 
-    // Ring buffer of past spectra = the spectral delay line.
-    static constexpr int numFramesMax = 2048;     // bounds max delay & memory
-    std::vector<float> spectralRing;               // numFramesMax * maxFrameSize
-    int writeFrame = 0;
+    // Ring buffer of past spectra = the spectral delay line. One flat pool,
+    // sized once in prepare() to hold maxDelaySeconds at the worst-case setting
+    // (smallest hop), then reinterpreted per setting: stride = 2 * activeFftSize,
+    // ringFrames = pool / stride. No audio-thread allocation, full 12 s always.
+    std::vector<float> spectralRing;
+    int frameStride = maxFrameSize;
+    int ringFrames  = 0;
+    int writeFrame  = 0;
+
+    // Pads engine latency up to the constant maxFftSize at smaller FFT sizes,
+    // keeping the wet path sample-aligned with the processor's dry delay.
+    std::array<float, maxFftSize> alignFifo {};
+    int alignPos = 0;
 };
