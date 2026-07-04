@@ -4,7 +4,7 @@ All notable changes to FFTDelay are documented here. The format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); the project uses semantic
 versioning once it reaches 1.0.
 
-## [Unreleased] — the v2 rework
+## [0.2.0] — 2026-07-02 — the rework
 
 ### Changed
 - **The painted matrices are now the parameters** (state version 2, with a
@@ -29,7 +29,9 @@ versioning once it reaches 1.0.
   shift-drag red band selection, IN/OUT sonograms, curve transformers and
   six-shape generators with undo, and free 75–200% vector resizing.
 
-### Added (before the rework)
+## [0.1.0] — 2026-06-29
+
+### Added
 - **Per-band spectral engine** — Attenuation / Delay / Feedback matrices as
   painted 160-point curves, with selectable Edit Mask (Linear / Adapted 2× / 4× /
   Logarithmic).

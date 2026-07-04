@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.22)
 
 # C is required too: on macOS JUCE compiles C / Objective-C sources internally.
-project(FFTDelay VERSION 0.1.0 LANGUAGES C CXX)
+project(FFTDelay VERSION 0.2.0 LANGUAGES C CXX)
 
 # --- Pull JUCE in automatically (no git submodule needed) ---------------------
 # FetchContent clones JUCE at configure time. The first configure is slow
