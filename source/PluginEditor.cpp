@@ -878,17 +878,17 @@ juce::String FFTDelayAudioProcessorEditor::imControlName (int algo, int idx)
 {
     static const char* names[12][3] = {
         { "", "", "" },                              // None
-        { "Depth", "Freq", "Duration" },             // Deterioration
-        { "Threshold", "Rev Gain", "" },             // Jello Mold
-        { "Shift", "", "" },                         // PitchRoll
+        { "Depth", "Freq", "Duration" },             // Erode
+        { "Threshold", "Rev Gain", "" },             // Invert
+        { "Shift", "", "" },                         // Bin Shift
         { "Depth", "", "" },                         // Smear
-        { "Azimuth", "", "" },                       // TimeSponge
-        { "Depth", "Speed", "Function" },            // Foam
-        { "Twist", "", "" },                         // Lime Twist
-        { "Depth", "Spread", "Offset" },             // Horse Tail
-        { "Gain", "Rate", "Feedback" },              // Mini-Pulses
-        { "Depth", "Threshold", "Invert" },          // Imprint
-        { "Phase", "", "" },                         // Phase Blaster
+        { "Azimuth", "", "" },                       // Drift
+        { "Depth", "Speed", "Function" },            // Ripple
+        { "Twist", "", "" },                         // Scatter
+        { "Depth", "Spread", "Offset" },             // Comb
+        { "Gain", "Rate", "Feedback" },              // Pulse Gate
+        { "Depth", "Threshold", "Invert" },          // Spectral Gate
+        { "Phase", "", "" },                         // Phase Scramble
     };
     if (juce::isPositiveAndBelow (algo, 12) && juce::isPositiveAndBelow (idx, 3))
         return names[algo][idx];

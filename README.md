@@ -37,9 +37,9 @@ free rate (Hz) or tempo **Sync** (1/1…1/16), and 3 routings → Attenuation /
 Delay / Feedback / Dry-Wet / Effect Gain / Matrix X (freq) / Matrix Y (level),
 each with bipolar depth.
 
-**Input Modulation:** one of 11 frequency-domain algorithms (Deterioration,
-Jello Mold, PitchRoll, Smear, TimeSponge, Foam, Lime Twist, Horse Tail,
-Mini-Pulses, Imprint, Phase Blaster), per channel with an **IM Link**. The three
+**Input Modulation:** one of 11 frequency-domain algorithms (Erode, Invert,
+Bin Shift, Smear, Drift, Ripple, Scatter, Comb, Pulse Gate, Spectral Gate,
+Phase Scramble), per channel with an **IM Link**. The three
 IM knobs relabel to the chosen algorithm's controls.
 
 **Output:** Dry/Wet (latency-compensated), Effect Gain (±24 dB), Mute, Bypass,

@@ -279,6 +279,24 @@ struct SpectralDelayTests : juce::UnitTest
         expect (std::abs (p2 - expected) <= hop);
         expect (v2 > 0.1f);
 
+        beginTest ("every input-mod algorithm stays finite on live signal");
+        sd.setFftOrder (SpectralDelay::minFftOrder);
+        sd.setOverlap (1);
+        sd.setWindowType (0);
+        sd.applyPendingSettings();
+        applyCurves (1.0f, 0.2f, 0.02f);
+        for (int algo = 1; algo <= 11; ++algo)
+        {
+            sd.reset();
+            sd.setInputMod (algo, 0.7f, 0.7f, 0.7f);
+            bool ok = true;
+            for (int n = 0; n < 4096; ++n)
+                if (! std::isfinite (sd.processSample (n == 0 ? 1.0f : 0.4f)))
+                    ok = false;
+            expect (ok, "algorithm " + juce::String (algo) + " produced non-finite output");
+        }
+        sd.setInputMod (0, 0.5f, 0.5f, 0.5f);
+
         beginTest ("impulse response stays finite and bounded under feedback");
         sd.setFftOrder (SpectralDelay::maxFftOrder);
         sd.setOverlap (2);

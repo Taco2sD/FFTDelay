@@ -82,12 +82,19 @@ private:
     // --- Input Modulation parameters + per-frame state ---
     int   imAlgo = 0;
     float imC1 = 0.5f, imC2 = 0.5f, imC3 = 0.5f;
-    double   imFoamPhase  = 0.0;
+    double   imEnvPhase  = 0.0;
     double   imPulsePhase = 0.0;
     uint32_t imRng = 0x9e3779b9u;
-    std::array<float, maxBins>      imHoleTimer {};   // Deterioration hold timers
-    std::array<float, maxFrameSize> imPrev {};        // TimeSponge previous spectrum
+    std::array<float, maxBins>      imHoleTimer {};   // Erode hold timers
+    std::array<float, maxFrameSize> imPrev {};        // Drift previous spectrum
     std::array<float, maxFrameSize> imScratch {};     // shift/scramble workspace
+    std::array<float, maxFrameSize> imPulseBuf {};    // Pulse Gate recirculation
+
+    // Scatter's time-shift memory: a short ring of past spectra each band can
+    // be independently displaced into (sized in prepare, never on the audio thread).
+    static constexpr int imHistoryFrames = 32;
+    std::vector<float> imHistory;
+    int imHistWrite = 0;
 
     std::array<float, maxBins>      magnitudes {};    // input spectrum for the UI
     std::array<float, maxBins>      outMagnitudes {}; // wet-output spectrum for the UI

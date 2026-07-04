@@ -23,6 +23,7 @@ void SpectralDelay::prepare (double sampleRate)
             poolFloats = juce::jmax (poolFloats, frames * (size_t) (2 * n));
         }
     spectralRing.assign (poolFloats, 0.0f);
+    imHistory.assign ((size_t) imHistoryFrames * maxFrameSize, 0.0f);
 
     bandGain.fill (1.0f);
     bandFeedback.fill (0.0f);
@@ -45,10 +46,14 @@ void SpectralDelay::reset()
 
     imHoleTimer.fill (0.0f);
     imPrev.fill (0.0f);
+    imPulseBuf.fill (0.0f);
+    if (! imHistory.empty())
+        std::fill (imHistory.begin(), imHistory.end(), 0.0f);
+    imHistWrite = 0;
     imScratch.fill (0.0f);
     magnitudes.fill (0.0f);
     outMagnitudes.fill (0.0f);
-    imFoamPhase  = 0.0;
+    imEnvPhase  = 0.0;
     imPulsePhase = 0.0;
 
     alignFifo.fill (0.0f);
@@ -274,7 +279,7 @@ void SpectralDelay::applyInputModulation (int bins) noexcept
 
     switch (imAlgo)
     {
-        case 1:   // Deterioration — Depth, Frequency (density), Duration
+        case 1:   // Erode — Depth, Frequency (density), Duration: random spectral holes
         {
             const float depth = imC1, density = imC2 * 0.5f, duration = 1.0f + imC3 * 30.0f;
             for (int b = 0; b <= bins; ++b)
@@ -285,17 +290,22 @@ void SpectralDelay::applyInputModulation (int bins) noexcept
             }
             break;
         }
-        case 2:   // Jello Mold — Threshold, Reverse Gain (invert loud bands)
-        {
-            const float thr = imC1, rg = imC2;
+        case 2:   // Invert — Threshold, Reverse Gain: LEVEL-inverts loud bands, so
+        {         // what is loud becomes quiet (reflected below the threshold).
+            const float thr = juce::jmax (1.0e-4f, imC1), rg = imC2;
             for (int b = 0; b <= bins; ++b)
             {
                 const float re = d[2*b], im = d[2*b+1];
-                if (std::sqrt (re*re + im*im) > thr) { d[2*b] = -re * rg; d[2*b+1] = -im * rg; }
+                const float magSq = re*re + im*im;
+                if (magSq > thr * thr)
+                {
+                    const float k = rg * (thr * thr) / magSq;   // mag' = rg * thr^2 / mag
+                    d[2*b] = re * k; d[2*b+1] = im * k;
+                }
             }
             break;
         }
-        case 3:   // PitchRoll — Shift the spectrum by up to +-128 bins
+        case 3:   // Bin Shift — shift the spectrum by up to +-128 bins
         {
             const int shift = (int) std::lround ((imC1 * 2.0f - 1.0f) * 128.0f);
             std::copy (fftData.begin(), fftData.begin() + 2 * (bins + 1), imScratch.begin());
@@ -323,7 +333,7 @@ void SpectralDelay::applyInputModulation (int bins) noexcept
             }
             break;
         }
-        case 5:   // TimeSponge — Azimuth (blend current spectrum with the last frame)
+        case 5:   // Drift — Azimuth (blend current spectrum with the last frame)
         {
             const float az = imC1;
             for (int b = 0; b <= bins; ++b)
@@ -335,12 +345,12 @@ void SpectralDelay::applyInputModulation (int bins) noexcept
             }
             break;
         }
-        case 6:   // Foam — Depth, Speed, Function (time-varying envelope)
+        case 6:   // Ripple — Depth, Speed, Function (time-varying envelope)
         {
             const float depth = imC1, speedHz = imC2 * 10.0f;
             const int   fn = juce::jlimit (0, 4, (int) (imC3 * 4.999f));
-            imFoamPhase += (double) speedHz / (double) fps; imFoamPhase -= std::floor (imFoamPhase);
-            const float p = (float) imFoamPhase;
+            imEnvPhase += (double) speedHz / (double) fps; imEnvPhase -= std::floor (imEnvPhase);
+            const float p = (float) imEnvPhase;
             float e = 0.0f;
             switch (fn)
             {
@@ -354,28 +364,45 @@ void SpectralDelay::applyInputModulation (int bins) noexcept
             for (int b = 0; b <= bins; ++b) { d[2*b] *= g; d[2*b+1] *= g; }
             break;
         }
-        case 7:   // Lime Twist — Max Twist (random per-bin magnitude jitter)
-        {
-            const float amt = imC1;
-            for (int b = 0; b <= bins; ++b) { const float j = 1.0f + amt * (rnd() * 2.0f - 1.0f); d[2*b] *= j; d[2*b+1] *= j; }
+        case 7:   // Scatter — Max Twist: each band is displaced independently in
+        {         // TIME, up to Max Twist frames into the recent past.
+            float* slot = &imHistory[(size_t) imHistWrite * (size_t) maxFrameSize];
+            std::copy (d, d + 2 * (bins + 1), slot);
+
+            const int span = (int) (imC1 * (float) (imHistoryFrames - 1));
+            for (int b = 0; b <= bins; ++b)
+            {
+                const int k = span > 0 ? (int) (rnd() * ((float) span + 0.999f)) : 0;
+                const float* src = &imHistory[(size_t) ((imHistWrite - k + imHistoryFrames)
+                                                        % imHistoryFrames) * (size_t) maxFrameSize];
+                d[2*b] = src[2*b]; d[2*b+1] = src[2*b+1];
+            }
+            imHistWrite = (imHistWrite + 1) % imHistoryFrames;
             break;
         }
-        case 8:   // Horse Tail — Depth, Spread (modulo), Offset (comb attenuation)
+        case 8:   // Comb — Depth, Spread (modulo), Offset (comb attenuation)
         {
             const float depth = imC1; const int spread = 2 + (int) (imC2 * 30.0f), offset = (int) (imC3 * (float) spread);
             for (int b = 0; b <= bins; ++b)
                 if ((((b - offset) % spread) + spread) % spread == 0) { const float g = 1.0f - depth; d[2*b] *= g; d[2*b+1] *= g; }
             break;
         }
-        case 9:   // Mini-Pulses — Gain, Repeat Time, Feedback (pulsed gate)
-        {
+        case 9:   // Pulse Gate — Gain, Repeat Time, Feedback: open pulses pass the
+        {         // input with makeup gain; while closed, the last pulse recirculates
+                  // through Feedback, leaving decaying repeats between pulses.
             const float gain = imC1 * 2.0f, rateHz = 0.5f + imC2 * 20.0f, fb = imC3;
             imPulsePhase += (double) rateHz / (double) fps; imPulsePhase -= std::floor (imPulsePhase);
-            const float g = (imPulsePhase < 0.2 ? 1.0f : fb) * gain;
-            for (int b = 0; b <= bins; ++b) { d[2*b] *= g; d[2*b+1] *= g; }
+            const bool open = imPulsePhase < 0.2;
+            for (int b = 0; b <= bins; ++b)
+            {
+                const float outRe = open ? d[2*b]   * gain : imPulseBuf[(size_t)(2*b)]   * fb;
+                const float outIm = open ? d[2*b+1] * gain : imPulseBuf[(size_t)(2*b+1)] * fb;
+                imPulseBuf[(size_t)(2*b)] = outRe; imPulseBuf[(size_t)(2*b+1)] = outIm;
+                d[2*b] = outRe; d[2*b+1] = outIm;
+            }
             break;
         }
-        case 10:  // Imprint — Depth, Threshold, Invert (spectral sieve)
+        case 10:  // Spectral Gate — Depth, Threshold, Invert (spectral sieve)
         {
             const float depth = imC1, thr = imC2; const bool inv = imC3 > 0.5f;
             for (int b = 0; b <= bins; ++b)
@@ -387,7 +414,7 @@ void SpectralDelay::applyInputModulation (int bins) noexcept
             }
             break;
         }
-        case 11:  // Phase Blaster — Phase Magic (phase scramble)
+        case 11:  // Phase Scramble — amount of per-bin phase randomisation (phase scramble)
         {
             const float amt = imC1;
             for (int b = 0; b <= bins; ++b)
