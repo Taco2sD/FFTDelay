@@ -1,6 +1,7 @@
 #pragma once
 
 #include <juce_audio_processors/juce_audio_processors.h>
+#include <map>
 #include <vector>
 #include "PluginProcessor.h"
 #include "SpectralCurves.h"
@@ -146,6 +147,19 @@ private:
     Knob&   addKnob   (const juce::String& paramID, const juce::String& text);
     Choice& addChoice (const juce::String& paramID, const juce::String& text);
     Toggle& addToggle (const juce::String& paramID, const juce::String& text);
+
+    // Controls are owned by the vectors below; these let resized() place each
+    // one by parameter id inside its section card.
+    std::map<juce::String, Knob*>   knobById;
+    std::map<juce::String, Choice*> choiceById;
+    std::map<juce::String, Toggle*> toggleById;
+
+    // Section cards (GLOBAL / EDIT / LFO / ANALYSIS across the top, INPUT MOD
+    // along the bottom): bounds captured in resized(), chrome drawn in paint().
+    static constexpr int numCards = 5;
+    std::array<juce::Rectangle<int>, numCards> cardBounds;
+
+    juce::Label bpmLabel;   // live host tempo readout (toolbar)
 
     FFTDelayAudioProcessor& processorRef;
 

@@ -463,6 +463,11 @@ FFTDelayAudioProcessorEditor::FFTDelayAudioProcessorEditor (FFTDelayAudioProcess
     resetButton.onClick = [this] { processorRef.requestEngineReset(); };
     addAndMakeVisible (resetButton);
 
+    bpmLabel.setJustificationType (juce::Justification::centredRight);
+    bpmLabel.setColour (juce::Label::textColourId, theme::colour (theme::accentDly));
+    bpmLabel.setFont (theme::value());
+    addAndMakeVisible (bpmLabel);
+
     // Preset bar.
     presetBox.setTextWhenNothingSelected ("Init");
     presetBox.onChange = [this]
@@ -524,7 +529,7 @@ FFTDelayAudioProcessorEditor::FFTDelayAudioProcessorEditor (FFTDelayAudioProcess
     refreshPresetBox();
     updateLinkMirrors();
     startTimerHz (6);     // keep the IM knob labels in sync with the selected algorithm
-    setSize (1180, 980);
+    setSize (1200, 960);
 }
 
 FFTDelayAudioProcessorEditor::~FFTDelayAudioProcessorEditor()
@@ -658,6 +663,10 @@ juce::String FFTDelayAudioProcessorEditor::imControlName (int algo, int idx)
 
 void FFTDelayAudioProcessorEditor::timerCallback()
 {
+    bpmLabel.setText (juce::String (processorRef.displayBpm.load (std::memory_order_relaxed), 1)
+                          + " BPM",
+                      juce::dontSendNotification);
+
     for (int set = 0; set < 2; ++set)
     {
         const auto* id = set == 0 ? "inputMod" : "inputModR";
@@ -694,6 +703,7 @@ FFTDelayAudioProcessorEditor::addKnob (const juce::String& paramID, const juce::
     registerParamLearn (k->slider, paramID);
 
     knobs.push_back (std::move (k));
+    knobById[paramID] = knobs.back().get();
     return *knobs.back();
 }
 
@@ -715,6 +725,7 @@ FFTDelayAudioProcessorEditor::addChoice (const juce::String& paramID, const juce
     registerParamLearn (c->box, paramID);
 
     choices.push_back (std::move (c));
+    choiceById[paramID] = choices.back().get();
     return *choices.back();
 }
 
@@ -730,6 +741,7 @@ FFTDelayAudioProcessorEditor::addToggle (const juce::String& paramID, const juce
     registerParamLearn (t->button, paramID);
 
     toggles.push_back (std::move (t));
+    toggleById[paramID] = toggles.back().get();
     return *toggles.back();
 }
 
@@ -737,55 +749,147 @@ void FFTDelayAudioProcessorEditor::paint (juce::Graphics& g)
 {
     g.fillAll (theme::colour (theme::bgApp));
 
+    // Section-card chrome: panel body, header strip, hairline, CAPS title.
+    static const char* cardTitles[numCards] = { "GLOBAL", "EDIT", "LFO", "ANALYSIS", "INPUT MOD" };
+    for (int i = 0; i < numCards; ++i)
+    {
+        auto r = cardBounds[(size_t) i].toFloat();
+        if (r.isEmpty())
+            continue;
+        g.setColour (theme::colour (theme::bgPanel));
+        g.fillRoundedRectangle (r, theme::cardRadius);
+        g.setColour (theme::colour (theme::bgHeader));
+        g.fillRect (r.withHeight (20.0f).reduced (1.0f, 1.0f));
+        g.setColour (theme::hairline());
+        g.drawRoundedRectangle (r, theme::cardRadius, 1.0f);
+        g.setColour (theme::colour (theme::textSecondary));
+        g.setFont (theme::label());
+        g.drawText (cardTitles[i], r.withHeight (20.0f).reduced (8.0f, 0.0f),
+                    juce::Justification::centredLeft);
+    }
+
     g.setColour (theme::colour (theme::textPrimary));
-    g.setFont (theme::heroReadout());
-    g.drawFittedText ("FFTDelay", getLocalBounds().removeFromTop (32),
-                      juce::Justification::centred, 1);
+    g.setFont (theme::header());
+    g.drawText ("FFTDELAY", getLocalBounds().reduced (12).removeFromTop (22),
+                juce::Justification::centredLeft);
 }
 
 void FFTDelayAudioProcessorEditor::resized()
 {
     auto area = getLocalBounds().reduced (12);
-    area.removeFromTop (28); // title
+    area.removeFromTop (24);   // title strip
 
-    // Preset bar.
-    auto presetBar = area.removeFromTop (26);
-    prevPresetButton.setBounds (presetBar.removeFromLeft (32).reduced (1, 0));
-    nextPresetButton.setBounds (presetBar.removeFromLeft (32).reduced (1, 0));
-    presetBox.setBounds        (presetBar.removeFromLeft (240).reduced (4, 0));
-    savePresetButton.setBounds (presetBar.removeFromLeft (76).reduced (4, 0));
-    midiButton.setBounds       (presetBar.removeFromLeft (76).reduced (4, 0));
+    // Card helpers: each card owns a header strip; controls fill the interior.
+    auto interiorOf = [] (juce::Rectangle<int> card) { return card.withTrimmedTop (22).reduced (10, 6); };
+    auto knobRow = [this] (juce::Rectangle<int> row, std::initializer_list<const char*> ids)
+    {
+        const int w = row.getWidth() / (int) ids.size();
+        for (auto* id : ids)
+            if (auto* k = knobById[id])
+            {
+                auto cell = row.removeFromLeft (w);
+                k->label.setBounds  (cell.removeFromTop (13));
+                k->slider.setBounds (cell);
+            }
+    };
+    auto choiceRow = [this] (juce::Rectangle<int> row, const char* id, int labelW)
+    {
+        if (auto* c = choiceById[id])
+        {
+            c->label.setBounds (row.removeFromLeft (labelW));
+            c->box.setBounds (row);
+        }
+    };
+
+    // --- Zone A: the four section cards --------------------------------------
+    auto zoneA = area.removeFromTop (168);
+    constexpr float cardWeights[] = { 1.15f, 1.0f, 1.4f, 0.95f };
+    const float cardWeightSum = cardWeights[0] + cardWeights[1] + cardWeights[2] + cardWeights[3];
+
+    for (int i = 0; i < 4; ++i)
+    {
+        const int w = (int) ((float) area.getWidth() * cardWeights[i] / cardWeightSum);
+        cardBounds[(size_t) i] = zoneA.removeFromLeft (w).reduced (3, 0);
+    }
+
+    {   // GLOBAL: presets, output knobs, state buttons.
+        auto in  = interiorOf (cardBounds[0]);
+        auto row = in.removeFromTop (22);
+        prevPresetButton.setBounds (row.removeFromLeft (24));
+        nextPresetButton.setBounds (row.removeFromLeft (24).translated (2, 0));
+        savePresetButton.setBounds (row.removeFromRight (44));
+        presetBox.setBounds (row.reduced (6, 0));
+        knobRow (in.removeFromTop (72), { "dryWet", "effectGain" });
+        auto btns = in.removeFromTop (20);
+        const int bw = btns.getWidth() / 4;
+        for (auto* b : { &toggleById["mute"]->button, &toggleById["bypass"]->button,
+                         &toggleById["freeze"]->button })
+            b->setBounds (btns.removeFromLeft (bw).reduced (2, 0));
+        midiButton.setBounds (btns.reduced (2, 0));
+    }
+
+    {   // EDIT: whole-curve offsets + curve actions.
+        auto in = interiorOf (cardBounds[1]);
+        knobRow (in.removeFromTop (72), { "attOffX", "delayOffX", "fbOffX" });
+        in.removeFromTop (4);
+        auto row = in.removeFromTop (20);
+        smoothButton.setBounds (row.removeFromLeft (row.getWidth() / 2).reduced (2, 0));
+        resetButton.setBounds (row.reduced (2, 0));
+    }
+
+    {   // LFO: on/sync/wave/div, then rate + depths, then destinations.
+        auto in  = interiorOf (cardBounds[2]);
+        auto row = in.removeFromTop (20);
+        toggleById["lfoOn"]->button.setBounds (row.removeFromLeft (36));
+        toggleById["lfoSync"]->button.setBounds (row.removeFromLeft (44).translated (3, 0));
+        if (auto* c = choiceById["lfoSyncRate"]) c->box.setBounds (row.removeFromRight (56));
+        if (auto* c = choiceById["lfoWave"])     c->box.setBounds (row.reduced (6, 0));
+        knobRow (in.removeFromTop (66), { "lfoRate", "lfoDepth1", "lfoDepth2", "lfoDepth3" });
+        auto dests = in.removeFromTop (20);
+        const int dw = dests.getWidth() / 3;
+        for (auto* id : { "lfoDest1", "lfoDest2", "lfoDest3" })
+            if (auto* c = choiceById[id])
+                c->box.setBounds (dests.removeFromLeft (dw).reduced (2, 0));
+    }
+
+    {   // ANALYSIS: the four framing selectors + housekeeping options.
+        auto in = interiorOf (cardBounds[3]);
+        for (auto* id : { "fftSize", "overlap", "window", "editMask" })
+        {
+            choiceRow (in.removeFromTop (22), id, 52);
+            in.removeFromTop (3);
+        }
+        auto row = in.removeFromTop (20);
+        toggleById["zeroDelayOnProgram"]->button.setBounds (row.removeFromLeft (row.getWidth() / 2).reduced (2, 0));
+        toggleById["ignoreMidiReset"]->button.setBounds (row.reduced (2, 0));
+    }
+
     area.removeFromTop (6);
 
-    // Control grids grow downward; the matrix editors take the space that's left
-    // above them. Compute the grid heights first, then give matrices the rest.
-    const int areaW = area.getWidth();
-    auto cols = [areaW] (int cellW) { return juce::jmax (1, areaW / cellW); };
+    // --- Zone B: tempo toolbar -------------------------------------------------
+    auto toolbar = area.removeFromTop (26);
+    choiceRow (toolbar.removeFromLeft (150), "delayRange", 62);
+    toolbar.removeFromLeft (8);
+    if (auto* c = choiceById["delayGrid"]) c->box.setBounds (toolbar.removeFromLeft (64));
+    toolbar.removeFromLeft (8);
+    toggleById["delaySync"]->button.setBounds (toolbar.removeFromLeft (46));
+    toolbar.removeFromLeft (4);
+    toggleById["autoQuantize"]->button.setBounds (toolbar.removeFromLeft (66));
+    bpmLabel.setBounds (toolbar.removeFromRight (110));
+    area.removeFromTop (6);
 
-    const int knobCellW = 96,  knobCellH = 84;
-    const int chCellW   = 124, chCellH   = 44;
-    const int tgCellW   = 116, tgCellH   = 30;
+    // --- Zone C: the matrix field + the INPUT MOD card --------------------------
+    // Three matrix columns (Delay widest), LEFT channel on the top row, RIGHT on
+    // the bottom, the graph-control strip between. matrixEditors: 0..2 L, 3..5 R.
+    auto imCard = area.removeFromBottom (128);
+    area.removeFromBottom (6);
+    auto matrixArea = area;
 
-    const int knobCols = cols (knobCellW);
-    const int chCols   = cols (chCellW);
-    const int tgCols   = cols (tgCellW);
-
-    const int knobRows = ((int) knobs.size()   + knobCols - 1) / knobCols;
-    const int chRows   = ((int) choices.size() + chCols   - 1) / chCols;
-    const int tgRows   = ((int) toggles.size() + 2 + tgCols - 1) / tgCols;
-
-    const int gridsH = knobRows * knobCellH + 6 + chRows * chCellH + 6 + tgRows * tgCellH;
-
-    // The matrix field: three matrix columns (Attenuation | Delay | Feedback,
-    // the Delay column widest), with the LEFT channel as the top row, the RIGHT
-    // channel as the bottom row, and the graph-control strip between them.
-    // matrixEditors index: 0..2 = L (Att/Dly/FB), 3..5 = R.
-    auto matrixArea = area.removeFromTop (juce::jmax (280, area.getHeight() - gridsH - 14));
     constexpr float colWeights[] = { 1.6f, 3.6f, 1.6f };
-    constexpr int   stripH = 40, colGap = 6;
+    constexpr int   stripH = 36, colGap = 6;
+    const float weightSum = colWeights[0] + colWeights[1] + colWeights[2];
 
-    const float weightSum  = colWeights[0] + colWeights[1] + colWeights[2];
-    const int   rowH       = (matrixArea.getHeight() - stripH) / 2;
+    const int rowH = (matrixArea.getHeight() - stripH) / 2;
     auto topRow    = matrixArea.removeFromTop (rowH);
     auto stripArea = matrixArea.removeFromTop (stripH);
     auto bottomRow = matrixArea;
@@ -800,7 +904,6 @@ void FFTDelayAudioProcessorEditor::resized()
         matrixEditors[(size_t) m]    ->setBounds (top.reduced (colGap / 2, 3));
         matrixEditors[(size_t) m + 3]->setBounds (bottom.reduced (colGap / 2, 3));
 
-        // Cluster: caption left, then the 16 px B / L / v / ^ micro-buttons.
         auto& c = clusters[(size_t) m];
         strip.reduce (colGap / 2 + 4, (stripH - 16) / 2);
         c.caption.setBounds (strip.removeFromLeft (juce::jmax (60, strip.getWidth() - 4 * 20)));
@@ -810,43 +913,26 @@ void FFTDelayAudioProcessorEditor::resized()
             strip.removeFromLeft (4);
         }
     }
-    area.removeFromTop (8);
 
-    // Knobs grid.
-    auto knobArea = area.removeFromTop (knobRows * knobCellH);
-    for (int i = 0; i < (int) knobs.size(); ++i)
-    {
-        juce::Rectangle<int> cell (knobArea.getX() + (i % knobCols) * knobCellW,
-                                   knobArea.getY() + (i / knobCols) * knobCellH,
-                                   knobCellW, knobCellH);
-        knobs[(size_t) i]->label.setBounds  (cell.removeFromTop (16));
-        knobs[(size_t) i]->slider.setBounds (cell.reduced (4));
-    }
-    area.removeFromTop (6);
+    // INPUT MOD card: left set | link/bypass column | right set.
+    cardBounds[4] = imCard;
+    auto in   = interiorOf (imCard);
+    auto mid  = in.withSizeKeepingCentre (64, in.getHeight());
+    auto lHalf = in.withRight (mid.getX() - 4);
+    auto rHalf = in.withLeft (mid.getRight() + 4);
 
-    // Choices grid.
-    auto chArea = area.removeFromTop (chRows * chCellH);
-    for (int i = 0; i < (int) choices.size(); ++i)
+    for (auto [half, algoId, left] :
+         { std::tuple (lHalf, "inputMod", true), std::tuple (rHalf, "inputModR", false) })
     {
-        juce::Rectangle<int> cell (chArea.getX() + (i % chCols) * chCellW,
-                                   chArea.getY() + (i / chCols) * chCellH,
-                                   chCellW, chCellH);
-        cell.reduce (5, 0);
-        choices[(size_t) i]->label.setBounds (cell.removeFromTop (16));
-        choices[(size_t) i]->box.setBounds   (cell.removeFromTop (24));
+        auto h = half;
+        if (auto* c = choiceById[algoId])
+            c->box.setBounds (h.removeFromTop (20).reduced (2, 0));
+        h.removeFromTop (2);
+        if (left) knobRow (h, { "imCtrl1",  "imCtrl2",  "imCtrl3"  });
+        else      knobRow (h, { "imCtrl1R", "imCtrl2R", "imCtrl3R" });
     }
-    area.removeFromTop (6);
 
-    // Toggles grid (+ the Smooth and Reset action buttons as final cells).
-    auto tgArea = area.removeFromTop (tgRows * tgCellH);
-    for (int i = 0; i <= (int) toggles.size() + 1; ++i)
-    {
-        juce::Rectangle<int> cell (tgArea.getX() + (i % tgCols) * tgCellW,
-                                   tgArea.getY() + (i / tgCols) * tgCellH,
-                                   tgCellW, tgCellH);
-        cell.reduce (6, 2);
-        if      (i < (int) toggles.size())  toggles[(size_t) i]->button.setBounds (cell);
-        else if (i == (int) toggles.size()) smoothButton.setBounds (cell);
-        else                                resetButton.setBounds (cell);
-    }
+    toggleById["imLink"]->button.setBounds (mid.removeFromTop (20).reduced (2, 0));
+    mid.removeFromTop (4);
+    toggleById["imBypass"]->button.setBounds (mid.removeFromTop (20).reduced (2, 0));
 }
