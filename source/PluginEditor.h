@@ -36,14 +36,21 @@ private:
     int             lastBand = -1;
 };
 
-// Dark theme with arc-style rotary knobs, used across the whole editor.
+// The "Deepwater" look: flat matte chrome over theme:: tokens, with luminous
+// arcs and accents reserved for values and active states. Used editor-wide.
 class SpectralLookAndFeel : public juce::LookAndFeel_V4
 {
 public:
     SpectralLookAndFeel();
+
     void drawRotarySlider (juce::Graphics&, int x, int y, int width, int height,
                            float sliderPos, float rotaryStartAngle, float rotaryEndAngle,
                            juce::Slider&) override;
+    void drawButtonBackground (juce::Graphics&, juce::Button&,
+                               const juce::Colour& backgroundColour,
+                               bool highlighted, bool down) override;
+    void drawButtonText (juce::Graphics&, juce::TextButton&,
+                         bool highlighted, bool down) override;
 };
 
 // The MIDI Learn manager: a live list of every current CC assignment with

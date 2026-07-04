@@ -1,62 +1,96 @@
 #include "PluginEditor.h"
+#include "Theme.h"
 #include <cmath>
 
 //==============================================================================
-// SpectralLookAndFeel — dark theme + arc rotary knobs.
+// SpectralLookAndFeel — every colour and font comes from theme:: tokens.
 //==============================================================================
 SpectralLookAndFeel::SpectralLookAndFeel()
 {
-    const juce::Colour bg     (0xff1c1c20);
-    const juce::Colour panel  (0xff26262c);
-    const juce::Colour accent (0xff5ac8fa);
-    const juce::Colour text   (0xffe6e6ea);
+    setColour (juce::ResizableWindow::backgroundColourId, theme::colour (theme::bgApp));
 
-    setColour (juce::ResizableWindow::backgroundColourId, bg);
-    setColour (juce::Slider::rotarySliderFillColourId,   accent);
-    setColour (juce::Slider::textBoxTextColourId,        text);
-    setColour (juce::Slider::textBoxOutlineColourId,     juce::Colours::transparentBlack);
-    setColour (juce::Label::textColourId,                text);
+    setColour (juce::Slider::rotarySliderFillColourId, theme::colour (theme::accentDly));
+    setColour (juce::Slider::textBoxTextColourId,      theme::colour (theme::textPrimary));
+    setColour (juce::Slider::textBoxOutlineColourId,   juce::Colours::transparentBlack);
+    setColour (juce::Label::textColourId,              theme::colour (theme::textSecondary));
 
-    setColour (juce::ComboBox::backgroundColourId, panel);
-    setColour (juce::ComboBox::textColourId,       text);
-    setColour (juce::ComboBox::outlineColourId,    juce::Colour (0xff3a3a42));
-    setColour (juce::ComboBox::arrowColourId,      accent);
-    setColour (juce::PopupMenu::backgroundColourId, panel);
-    setColour (juce::PopupMenu::highlightedBackgroundColourId, accent.withAlpha (0.4f));
+    setColour (juce::ComboBox::backgroundColourId, theme::colour (theme::bgInset));
+    setColour (juce::ComboBox::textColourId,       theme::colour (theme::textPrimary));
+    setColour (juce::ComboBox::outlineColourId,    theme::hairline());
+    setColour (juce::ComboBox::arrowColourId,      theme::colour (theme::accentDly));
 
-    setColour (juce::TextButton::buttonColourId,   panel);
-    setColour (juce::TextButton::buttonOnColourId, accent);
-    setColour (juce::TextButton::textColourOffId,  text);
-    setColour (juce::TextButton::textColourOnId,   juce::Colours::black);
+    setColour (juce::PopupMenu::backgroundColourId, theme::colour (theme::bgMenu));
+    setColour (juce::PopupMenu::textColourId,       theme::colour (theme::textPrimary));
+    setColour (juce::PopupMenu::highlightedBackgroundColourId,
+               theme::colour (theme::accentDly).withAlpha (0.18f));
+    setColour (juce::PopupMenu::highlightedTextColourId, theme::colour (theme::textPrimary));
+
+    setColour (juce::TextButton::buttonColourId,   theme::colour (theme::bgPanel));
+    setColour (juce::TextButton::buttonOnColourId, theme::colour (theme::accentDly));
+    setColour (juce::TextButton::textColourOffId,  theme::colour (theme::textSecondary));
+    setColour (juce::TextButton::textColourOnId,   theme::colour (theme::bgCanvas));
 }
 
 void SpectralLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int width, int height,
-                                            float pos, float a0, float a1, juce::Slider&)
+                                            float pos, float a0, float a1, juce::Slider& s)
 {
     auto bounds = juce::Rectangle<float> ((float) x, (float) y, (float) width, (float) height).reduced (4.0f);
     const float radius = juce::jmin (bounds.getWidth(), bounds.getHeight()) * 0.5f;
     const float cx = bounds.getCentreX(), cy = bounds.getCentreY();
-    const float lineW = juce::jmax (2.0f, radius * 0.14f);
+    const float lineW = juce::jmax (theme::arcThickness, radius * 0.1f);
     const float arcR  = radius - lineW * 0.5f;
     const float ang   = a0 + pos * (a1 - a0);
 
-    juce::Path bgArc;
-    bgArc.addCentredArc (cx, cy, arcR, arcR, 0.0f, a0, a1, true);
-    g.setColour (juce::Colour (0xff3a3a42));
-    g.strokePath (bgArc, juce::PathStrokeType (lineW, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-
-    juce::Path valArc;
+    // Track arc, then the luminous value arc in this knob's accent.
+    auto stroke = juce::PathStrokeType (lineW, juce::PathStrokeType::curved,
+                                        juce::PathStrokeType::rounded);
+    juce::Path track, valArc;
+    track.addCentredArc  (cx, cy, arcR, arcR, 0.0f, a0, a1, true);
     valArc.addCentredArc (cx, cy, arcR, arcR, 0.0f, a0, ang, true);
-    g.setColour (findColour (juce::Slider::rotarySliderFillColourId));
-    g.strokePath (valArc, juce::PathStrokeType (lineW, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    g.setColour (juce::Colours::white.withAlpha (0.15f));
+    g.strokePath (track, stroke);
+    g.setColour (s.findColour (juce::Slider::rotarySliderFillColourId));
+    g.strokePath (valArc, stroke);
 
-    // Knob body + pointer.
-    const float innerR = arcR - lineW;
-    g.setColour (juce::Colour (0xff202026));
+    // Flat body disc + hairline pointer.
+    const float innerR = arcR - lineW * 1.6f;
+    g.setColour (theme::colour (theme::bgPanel).brighter (0.06f));
     g.fillEllipse (cx - innerR, cy - innerR, innerR * 2.0f, innerR * 2.0f);
     const juce::Point<float> tip (cx + innerR * std::sin (ang), cy - innerR * std::cos (ang));
-    g.setColour (findColour (juce::Slider::rotarySliderFillColourId));
+    g.setColour (s.findColour (juce::Slider::rotarySliderFillColourId));
     g.drawLine (cx, cy, tip.x, tip.y, juce::jmax (1.5f, lineW * 0.6f));
+}
+
+void SpectralLookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Button& b,
+                                                const juce::Colour&, bool highlighted, bool down)
+{
+    auto r = b.getLocalBounds().toFloat().reduced (0.5f);
+    const bool on = b.getToggleState();
+
+    if (on)
+    {
+        auto fill = b.findColour (juce::TextButton::buttonOnColourId);
+        g.setColour (down ? fill.darker (0.2f) : highlighted ? fill.brighter (0.1f) : fill);
+        g.fillRoundedRectangle (r, theme::cornerRadius);
+    }
+    else
+    {
+        if (highlighted || down)
+        {
+            g.setColour (juce::Colours::white.withAlpha (down ? 0.08f : 0.05f));
+            g.fillRoundedRectangle (r, theme::cornerRadius);
+        }
+        g.setColour (theme::colour (theme::stateOff));
+        g.drawRoundedRectangle (r, theme::cornerRadius, 1.0f);
+    }
+}
+
+void SpectralLookAndFeel::drawButtonText (juce::Graphics& g, juce::TextButton& b, bool, bool)
+{
+    g.setFont (theme::label());
+    g.setColour (b.findColour (b.getToggleState() ? juce::TextButton::textColourOnId
+                                                  : juce::TextButton::textColourOffId));
+    g.drawFittedText (b.getButtonText(), b.getLocalBounds().reduced (2), juce::Justification::centred, 1);
 }
 
 //==============================================================================
@@ -167,9 +201,9 @@ void MidiLearnPanel::resized()
 
 void MidiLearnPanel::paint (juce::Graphics& g)
 {
-    g.fillAll (juce::Colour (0xff232328));
-    g.setColour (juce::Colours::white);
-    g.setFont (juce::FontOptions (14.0f, juce::Font::bold));
+    g.fillAll (theme::colour (theme::bgPanel));
+    g.setColour (theme::colour (theme::textPrimary));
+    g.setFont (theme::header());
 
     if (signature.empty())
         g.drawText ("No MIDI assignments yet - right-click any control and choose MIDI Learn.",
@@ -194,11 +228,11 @@ void MatrixEditor::paint (juce::Graphics& g)
 {
     auto r = getLocalBounds().toFloat();
 
-    g.setColour (juce::Colour (0xff1a1a1f));
+    g.setColour (theme::colour (theme::bgCanvas));
     g.fillRoundedRectangle (r, 4.0f);
 
     // Horizontal mid/unity gridlines.
-    g.setColour (juce::Colour (0xff2e2e36));
+    g.setColour (theme::gridline());
     for (int i = 1; i < 4; ++i)
     {
         const float y = r.getY() + r.getHeight() * (float) i / 4.0f;
@@ -318,19 +352,15 @@ FFTDelayAudioProcessorEditor::FFTDelayAudioProcessorEditor (FFTDelayAudioProcess
 {
     setLookAndFeel (&lookAndFeel);
 
-    // Six matrix editors: left column = channel 0 (L), right column = channel 1 (R).
-    struct MatrixDef { int matrix; const char* name; juce::uint32 colour; };
-    const MatrixDef defs[] = {
-        { SpectralCurves::Attenuation, "Attenuation", 0xff5ac8fa },
-        { SpectralCurves::Delay,       "Delay",       0xffffcc00 },
-        { SpectralCurves::Feedback,    "Feedback",    0xffff6b6b },
-    };
+    // Six matrix editors: left column = channel 0 (L), right column = channel 1 (R),
+    // each tinted with its matrix's accent from the theme.
+    static const char* matrixNames[] = { "Attenuation", "Delay", "Feedback" };
     for (int ch = 0; ch < 2; ++ch)
-        for (const auto& d : defs)
+        for (int m = 0; m < SpectralCurves::numMatrices; ++m)
         {
-            auto title = juce::String (d.name) + (ch == 0 ? " L" : " R");
-            auto e = std::make_unique<MatrixEditor> (p, p.curves[(size_t) ch], d.matrix,
-                                                     title, juce::Colour (d.colour));
+            auto title = juce::String (matrixNames[m]) + (ch == 0 ? " L" : " R");
+            auto e = std::make_unique<MatrixEditor> (p, p.curves[(size_t) ch], m,
+                                                     title, theme::accentFor (m));
             addAndMakeVisible (*e);
             matrixEditors.push_back (std::move (e));
         }
@@ -465,7 +495,7 @@ FFTDelayAudioProcessorEditor::FFTDelayAudioProcessorEditor (FFTDelayAudioProcess
         o.content.setOwned (new MidiLearnPanel (processorRef));
         o.content->setSize (560, 360);
         o.dialogTitle             = "MIDI Learn";
-        o.dialogBackgroundColour  = juce::Colour (0xff232328);
+        o.dialogBackgroundColour  = theme::colour (theme::bgPanel);
         o.escapeKeyTriggersCloseButton = true;
         o.useNativeTitleBar       = true;
         o.resizable               = true;
@@ -690,11 +720,11 @@ FFTDelayAudioProcessorEditor::addToggle (const juce::String& paramID, const juce
 
 void FFTDelayAudioProcessorEditor::paint (juce::Graphics& g)
 {
-    g.fillAll (getLookAndFeel().findColour (juce::ResizableWindow::backgroundColourId));
+    g.fillAll (theme::colour (theme::bgApp));
 
-    g.setColour (juce::Colours::white);
-    g.setFont (juce::FontOptions (20.0f, juce::Font::bold));
-    g.drawFittedText ("FFTDelay - Spectral Delay", getLocalBounds().removeFromTop (32),
+    g.setColour (theme::colour (theme::textPrimary));
+    g.setFont (theme::heroReadout());
+    g.drawFittedText ("FFTDelay", getLocalBounds().removeFromTop (32),
                       juce::Justification::centred, 1);
 }
 
