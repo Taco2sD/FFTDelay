@@ -47,6 +47,7 @@ void SpectralDelay::reset()
     imPrev.fill (0.0f);
     imScratch.fill (0.0f);
     magnitudes.fill (0.0f);
+    outMagnitudes.fill (0.0f);
     imFoamPhase  = 0.0;
     imPulsePhase = 0.0;
 
@@ -240,6 +241,13 @@ void SpectralDelay::processFrame() noexcept
     }
 
     writeFrame = (writeFrame + 1) % ringFrames;
+
+    // Capture the wet-output spectrum (post matrices) for the UI display.
+    for (int b = 0; b <= bins; ++b)
+    {
+        const float re = fftData[(size_t) (2 * b)], im = fftData[(size_t) (2 * b + 1)];
+        outMagnitudes[(size_t) b] = std::sqrt (re * re + im * im) * magScale;
+    }
 
     activeFft->performRealOnlyInverseTransform (fftData.data());
 

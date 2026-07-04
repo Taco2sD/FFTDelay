@@ -47,9 +47,10 @@ public:
     // it handles save/restore of plugin state for you.
     juce::AudioProcessorValueTreeState apvts;
 
-    // Latest analysed spectrum (channel 0), published lock-free for the editor's
-    // spectral displays. Written on the audio thread, read on the UI thread.
-    std::array<std::atomic<float>, SpectralDelay::maxBins> displaySpectrum {};
+    // Latest magnitude spectra per channel, published lock-free for the editor's
+    // sonograms: analysed input and wet output. Audio thread writes, UI reads.
+    using DisplaySpectrum = std::array<std::atomic<float>, SpectralDelay::maxBins>;
+    std::array<DisplaySpectrum, 2> displayIn {}, displayOut {};
     std::atomic<int>   displayBins { 0 };
     std::atomic<float> displayBpm { 120.0f };   // live host tempo, for grid/readouts
 

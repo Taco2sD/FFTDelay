@@ -562,11 +562,18 @@ void FFTDelayAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         }
     }
 
-    // Publish channel 0's analysed spectrum for the editor's display.
-    const auto& mags = spectralDelays[0].getMagnitudes();
-    const int   nb   = spectralDelays[0].getActiveNumBins();
-    for (int b = 0; b < nb; ++b)
-        displaySpectrum[(size_t) b].store (mags[(size_t) b], std::memory_order_relaxed);
+    // Publish both channels' input and wet-output spectra for the sonograms.
+    const int nb = spectralDelays[0].getActiveNumBins();
+    for (int ch = 0; ch < 2; ++ch)
+    {
+        const auto& in  = spectralDelays[(size_t) ch].getMagnitudes();
+        const auto& out = spectralDelays[(size_t) ch].getOutMagnitudes();
+        for (int b = 0; b < nb; ++b)
+        {
+            displayIn [(size_t) ch][(size_t) b].store (in[(size_t) b],  std::memory_order_relaxed);
+            displayOut[(size_t) ch][(size_t) b].store (out[(size_t) b], std::memory_order_relaxed);
+        }
+    }
     displayBins.store (nb, std::memory_order_relaxed);
 }
 

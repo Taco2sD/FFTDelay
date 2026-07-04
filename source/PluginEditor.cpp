@@ -94,6 +94,71 @@ void SpectralLookAndFeel::drawButtonText (juce::Graphics& g, juce::TextButton& b
 }
 
 //==============================================================================
+// Sonogram — scrolling spectral history (newest column at the left edge).
+//==============================================================================
+Sonogram::Sonogram (FFTDelayAudioProcessor& p, bool showOutput, juce::String c)
+    : processorRef (p), useOutput (showOutput), caption (std::move (c))
+{
+    setOpaque (true);
+    startTimerHz (30);
+}
+
+void Sonogram::resized()
+{
+    image = juce::Image (juce::Image::RGB,
+                         juce::jmax (1, getWidth()), juce::jmax (1, getHeight()), true);
+    image.clear (image.getBounds(), theme::colour (theme::bgCanvas));
+}
+
+void Sonogram::timerCallback()
+{
+    if (! image.isValid())
+        return;
+
+    const int w = image.getWidth(), h = image.getHeight();
+    if (w > 1)
+        image.moveImageSection (1, 0, 0, 0, w - 1, h);   // older frames drift right
+
+    // Loudness ramp: canvas black -> deep teal -> hero cyan -> white.
+    static const juce::Colour stops[] = { theme::colour (theme::bgCanvas),
+                                          juce::Colour (0xff0e5b7c),
+                                          theme::colour (theme::accentDly),
+                                          juce::Colours::white };
+    auto ramp = [] (float v)
+    {
+        v = juce::jlimit (0.0f, 1.0f, v) * 3.0f;
+        const int i = juce::jmin (2, (int) v);
+        return stops[(size_t) i].interpolatedWith (stops[(size_t) i + 1], v - (float) i);
+    };
+
+    const int bins  = juce::jmax (2, processorRef.displayBins.load (std::memory_order_relaxed));
+    const int halfH = h / 2;
+    for (int ch = 0; ch < 2; ++ch)
+    {
+        const auto& spec = useOutput ? processorRef.displayOut[(size_t) ch]
+                                     : processorRef.displayIn[(size_t) ch];
+        for (int y = 0; y < halfH; ++y)   // low frequencies at each half's bottom
+        {
+            const int   bin = (halfH - 1 - y) * (bins - 1) / juce::jmax (1, halfH - 1);
+            const float dB  = juce::Decibels::gainToDecibels (
+                                  spec[(size_t) bin].load (std::memory_order_relaxed), -90.0f);
+            image.setPixelAt (0, ch * halfH + y, ramp ((dB + 70.0f) / 70.0f));
+        }
+    }
+    repaint();
+}
+
+void Sonogram::paint (juce::Graphics& g)
+{
+    g.drawImageAt (image, 0, 0);
+    g.setColour (theme::hairline());
+    g.drawHorizontalLine (getHeight() / 2, 0.0f, (float) getWidth());
+    g.setColour (theme::colour (theme::textSecondary));
+    g.setFont (theme::label());
+    g.drawText (caption, getLocalBounds().reduced (4), juce::Justification::topLeft);
+}
+
+//==============================================================================
 // MidiLearnPanel — live list of MIDI assignments with range/channel/invert.
 //==============================================================================
 MidiLearnPanel::MidiLearnPanel (FFTDelayAudioProcessor& p) : processorRef (p)
@@ -369,6 +434,9 @@ FFTDelayAudioProcessorEditor::FFTDelayAudioProcessorEditor (FFTDelayAudioProcess
             addAndMakeVisible (*e);
             matrixEditors.push_back (std::move (e));
         }
+
+    addAndMakeVisible (sonoIn);
+    addAndMakeVisible (sonoOut);
 
     addKnob ("dryWet",     "Dry/Wet");
     addKnob ("effectGain", "Effect Gain");
@@ -878,25 +946,31 @@ void FFTDelayAudioProcessorEditor::resized()
     bpmLabel.setBounds (toolbar.removeFromRight (110));
     area.removeFromTop (6);
 
-    // --- Zone C: the matrix field + the INPUT MOD card --------------------------
-    // Three matrix columns (Delay widest), LEFT channel on the top row, RIGHT on
-    // the bottom, the graph-control strip between. matrixEditors: 0..2 L, 3..5 R.
+    // --- Zone C: sonograms | matrix field | sonogram, + the INPUT MOD card ------
+    // The IN and OUT spectral histories flank three matrix columns (Delay
+    // widest); LEFT channel on the top row, RIGHT on the bottom, the
+    // graph-control strip between. matrixEditors: 0..2 L, 3..5 R.
     auto imCard = area.removeFromBottom (128);
     area.removeFromBottom (6);
     auto matrixArea = area;
+
+    const int sonoW = (int) ((float) matrixArea.getWidth() * 1.0f / 8.8f);
+    sonoIn.setBounds  (matrixArea.removeFromLeft (sonoW).reduced (3));
+    sonoOut.setBounds (matrixArea.removeFromRight (sonoW).reduced (3));
 
     constexpr float colWeights[] = { 1.6f, 3.6f, 1.6f };
     constexpr int   stripH = 36, colGap = 6;
     const float weightSum = colWeights[0] + colWeights[1] + colWeights[2];
 
-    const int rowH = (matrixArea.getHeight() - stripH) / 2;
+    const int fieldW = matrixArea.getWidth();
+    const int rowH   = (matrixArea.getHeight() - stripH) / 2;
     auto topRow    = matrixArea.removeFromTop (rowH);
     auto stripArea = matrixArea.removeFromTop (stripH);
     auto bottomRow = matrixArea;
 
     for (int m = 0; m < SpectralCurves::numMatrices; ++m)
     {
-        const int w = (int) ((float) area.getWidth() * colWeights[m] / weightSum);
+        const int w = (int) ((float) fieldW * colWeights[m] / weightSum);
         auto top    = topRow.removeFromLeft (w);
         auto strip  = stripArea.removeFromLeft (w);
         auto bottom = bottomRow.removeFromLeft (w);

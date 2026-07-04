@@ -68,9 +68,11 @@ public:
     // alignment delay, so the dry path never drifts against the wet path.
     static constexpr int getLatencySamples() noexcept { return maxFftSize; }
 
-    // Latest analysed magnitude spectrum (per bin, ~0..1) for the UI display.
+    // Latest magnitude spectra (per bin, ~0..1) for the UI sonograms: the
+    // analysed input (post input-modulation) and the wet output (post matrices).
     // Written on the audio thread once per frame; copied by the processor.
-    const std::array<float, maxBins>& getMagnitudes() const noexcept { return magnitudes; }
+    const std::array<float, maxBins>& getMagnitudes()    const noexcept { return magnitudes; }
+    const std::array<float, maxBins>& getOutMagnitudes() const noexcept { return outMagnitudes; }
 
 private:
     void processFrame() noexcept;
@@ -87,7 +89,8 @@ private:
     std::array<float, maxFrameSize> imPrev {};        // TimeSponge previous spectrum
     std::array<float, maxFrameSize> imScratch {};     // shift/scramble workspace
 
-    std::array<float, maxBins>      magnitudes {};    // analysed spectrum for the UI
+    std::array<float, maxBins>      magnitudes {};    // input spectrum for the UI
+    std::array<float, maxBins>      outMagnitudes {}; // wet-output spectrum for the UI
 
     // Pre-built FFTs, one per supported order, so switching size never allocates.
     std::array<std::unique_ptr<juce::dsp::FFT>, maxFftOrder + 1> ffts;

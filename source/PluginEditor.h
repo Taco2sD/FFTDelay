@@ -45,6 +45,30 @@ private:
     int             lastBand = -1;
 };
 
+// A scrolling spectral history fed from the processor's lock-free spectrum
+// taps: the newest frame enters at the left edge and drifts right, at 30 fps.
+// The top half shows the LEFT channel, the bottom half the RIGHT; low
+// frequencies sit at the bottom of each half.
+class Sonogram : public juce::Component,
+                 private juce::Timer
+{
+public:
+    Sonogram (FFTDelayAudioProcessor&, bool showOutput, juce::String caption);
+
+    void paint (juce::Graphics&) override;
+    void resized() override;
+
+private:
+    void timerCallback() override;
+
+    FFTDelayAudioProcessor& processorRef;
+    bool         useOutput;
+    juce::String caption;
+    juce::Image  image;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (Sonogram)
+};
+
 // The "Deepwater" look: flat matte chrome over theme:: tokens, with luminous
 // arcs and accents reserved for values and active states. Used editor-wide.
 class SpectralLookAndFeel : public juce::LookAndFeel_V4
@@ -169,6 +193,10 @@ private:
     // Six matrix editors: a left column (channel 0) and right column (channel 1),
     // each Attenuation / Delay / Feedback. Both channels visible at once.
     std::vector<std::unique_ptr<MatrixEditor>> matrixEditors;
+
+    // Scrolling spectral histories flanking the matrix field.
+    Sonogram sonoIn  { processorRef, false, "IN" };
+    Sonogram sonoOut { processorRef, true,  "OUT" };
 
     // Actions (not stored parameters): Smooth smears the matrices a little more
     // per click; Reset clears all delay memory at the next audio block.
