@@ -384,12 +384,13 @@ void FFTDelayAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     const int   gridIdx      = (int) apvts.getRawParameterValue ("delayGrid")->load();
     const bool  autoQuantize = apvts.getRawParameterValue ("autoQuantize")->load() > 0.5f;
 
-    // Host tempo (used by both the delay grid and a synced LFO).
+    // Host tempo (used by the delay grid, a synced LFO, and the UI readouts).
     double bpm = 120.0;
     if (auto* ph = getPlayHead())
         if (auto pos = ph->getPosition())
             if (auto hostBpm = pos->getBpm(); hostBpm && *hostBpm > 0.0)
                 bpm = *hostBpm;
+    displayBpm.store ((float) bpm, std::memory_order_relaxed);
 
     // --- LFO: advance once per block, then route to up to 3 destinations -------
     // Modulation targets are whole-curve offsets applied at fan-out time (the

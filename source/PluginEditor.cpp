@@ -219,76 +219,79 @@ void MidiLearnPanel::paint (juce::Graphics& g)
 MatrixEditor::MatrixEditor (FFTDelayAudioProcessor& proc, SpectralCurves& curvesToEdit,
                             int matrixIndex, juce::String t, juce::Colour c)
     : processorRef (proc), curves (&curvesToEdit), matrix (matrixIndex),
+      inverted (matrixIndex == SpectralCurves::Attenuation),
       title (std::move (t)), colour (c)
 {
-    startTimerHz (30);   // refresh the spectral-analyzer backdrop
+    startTimerHz (4);   // catch tempo-grid / BPM changes without edit events
+}
+
+void MatrixEditor::drawTempoGrid (juce::Graphics& g, juce::Rectangle<float> r) const
+{
+    const auto& apvts = processorRef.apvts;
+    if (apvts.getRawParameterValue ("delaySync")->load() < 0.5f)
+        return;
+
+    static constexpr float rangeSeconds[] = { 0.375f, 0.75f, 1.5f, 3.0f, 6.0f, 12.0f };
+    static constexpr float gridFactor[]   = { 1.0f, 0.5f, 1.0f / 3.0f, 0.25f };
+
+    const float maxDelay = rangeSeconds[juce::jlimit (0, 5,
+                               (int) apvts.getRawParameterValue ("delayRange")->load())];
+    const float bpm      = apvts.getRawParameterValue ("autoQuantize")->load() > 0.5f
+                               ? processorRef.displayBpm.load (std::memory_order_relaxed) : 120.0f;
+    const float gridSec  = (60.0f / bpm) * gridFactor[juce::jlimit (0, 3,
+                               (int) apvts.getRawParameterValue ("delayGrid")->load())];
+
+    g.setColour (colour.withAlpha (0.2f));
+    for (float sec = gridSec; sec < maxDelay; sec += gridSec)
+        g.drawVerticalLine ((int) (r.getX() + r.getWidth() * sec / maxDelay),
+                            r.getY(), r.getBottom());
 }
 
 void MatrixEditor::paint (juce::Graphics& g)
 {
     auto r = getLocalBounds().toFloat();
-
     g.setColour (theme::colour (theme::bgCanvas));
     g.fillRoundedRectangle (r, 4.0f);
 
-    // Horizontal mid/unity gridlines.
+    // Quarter guides on both axes (frequency vertical, value horizontal).
     g.setColour (theme::gridline());
     for (int i = 1; i < 4; ++i)
     {
-        const float y = r.getY() + r.getHeight() * (float) i / 4.0f;
-        g.drawHorizontalLine ((int) y, r.getX(), r.getRight());
+        g.drawHorizontalLine ((int) (r.getY() + r.getHeight() * (float) i / 4.0f), r.getX(), r.getRight());
+        g.drawVerticalLine   ((int) (r.getX() + r.getWidth()  * (float) i / 4.0f), r.getY(), r.getBottom());
     }
 
-    // Spectral-analyzer backdrop: the live analysed spectrum, log-scaled. Each bin
-    // is placed on the same edit-band x-axis the curves use (via the active mask),
-    // so the spectrum lines up with the painted curve under any Edit Mask.
-    const int specBins = processorRef.displayBins.load (std::memory_order_relaxed);
-    if (specBins > 1)
-    {
-        const int mask = (int) processorRef.apvts.getRawParameterValue ("editMask")->load();
-        const float n1 = (float) (SpectralCurves::numEditBands - 1);
+    if (matrix == SpectralCurves::Delay)
+        drawTempoGrid (g, r);
 
-        juce::Path spec;
-        spec.startNewSubPath (r.getX(), r.getBottom());
-        for (int b = 0; b < specBins; ++b)
-        {
-            const float mag = processorRef.displaySpectrum[(size_t) b].load (std::memory_order_relaxed);
-            const float dB  = juce::Decibels::gainToDecibels (mag, -90.0f);
-            const float y01 = juce::jlimit (0.0f, 1.0f, (dB + 70.0f) / 70.0f);
-            const int   band = SpectralCurves::binToEditBand (b, specBins, mask);
-            const float x    = r.getX() + r.getWidth() * (float) band / n1;
-            spec.lineTo (x, r.getBottom() - r.getHeight() * y01);
-        }
-        spec.lineTo (r.getRight(), r.getBottom());
-        spec.closeSubPath();
-        g.setColour (juce::Colours::white.withAlpha (0.10f));
-        g.fillPath (spec);
-    }
-
-    // The curve, drawn as a filled area from the bottom.
-    const int   n = SpectralCurves::numEditBands;
-    const float w = r.getWidth();
-    const float h = r.getHeight();
-
-    juce::Path fill;
-    fill.startNewSubPath (r.getX(), r.getBottom());
+    // The band profile: frequency runs bottom -> top, each band's value extends
+    // rightward from the left edge. Filled flat, then the value edge is stroked
+    // twice - a wide low-alpha pass for glow and a crisp line on top.
+    const int n = SpectralCurves::numEditBands;
+    juce::Path edge;
     for (int b = 0; b < n; ++b)
     {
-        const float x = r.getX() + w * (float) b / (float) (n - 1);
-        const float y = r.getBottom() - h * curves->get (matrix, b);
-        fill.lineTo (x, y);
+        const float x = r.getX() + r.getWidth() * toDisplay (curves->get (matrix, b));
+        const float y = r.getBottom() - r.getHeight() * ((float) b + 0.5f) / (float) n;
+        if (b == 0) edge.startNewSubPath (x, y);
+        else        edge.lineTo (x, y);
     }
-    fill.lineTo (r.getRight(), r.getBottom());
+
+    juce::Path fill (edge);
+    fill.lineTo (r.getX(), r.getY());
+    fill.lineTo (r.getX(), r.getBottom());
     fill.closeSubPath();
 
-    g.setColour (colour.withAlpha (0.35f));
+    g.setColour (colour.withAlpha (0.28f));
     g.fillPath (fill);
+    g.setColour (colour.withAlpha (0.25f));
+    g.strokePath (edge, juce::PathStrokeType (4.0f, juce::PathStrokeType::curved));
     g.setColour (colour);
-    g.strokePath (fill, juce::PathStrokeType (1.5f));
+    g.strokePath (edge, juce::PathStrokeType (1.5f, juce::PathStrokeType::curved));
 
-    g.setColour (juce::Colours::white.withAlpha (0.8f));
-    g.setFont (juce::FontOptions (13.0f, juce::Font::bold));
-    g.drawText (title, r.reduced (6.0f), juce::Justification::topLeft);
+    g.setColour (theme::colour (theme::textSecondary));
+    g.setFont (theme::label());
+    g.drawText (title.toUpperCase(), r.reduced (6.0f), juce::Justification::topLeft);
 }
 
 void MatrixEditor::mouseDown (const juce::MouseEvent& e)
@@ -317,8 +320,10 @@ void MatrixEditor::paintStroke (juce::Point<float> pos)
     if (w <= 0.0f || h <= 0.0f)
         return;
 
-    const int   band  = juce::jlimit (0, n - 1, (int) std::round (pos.x / w * (float) (n - 1)));
-    const float value = juce::jlimit (0.0f, 1.0f, 1.0f - pos.y / h);
+    // Rotated axes: vertical position picks the band (bottom = band 0), the
+    // horizontal position is the value (via the display inversion, if any).
+    const int   band  = juce::jlimit (0, n - 1, (int) std::round ((1.0f - pos.y / h) * (float) (n - 1)));
+    const float value = toStored (juce::jlimit (0.0f, 1.0f, pos.x / w));
 
     // Interpolate across any bands skipped since the last mouse position so a fast
     // drag still paints a continuous line.

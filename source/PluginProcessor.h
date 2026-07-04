@@ -48,9 +48,10 @@ public:
     juce::AudioProcessorValueTreeState apvts;
 
     // Latest analysed spectrum (channel 0), published lock-free for the editor's
-    // spectral-analyzer display. Written on the audio thread, read on the UI thread.
+    // spectral displays. Written on the audio thread, read on the UI thread.
     std::array<std::atomic<float>, SpectralDelay::maxBins> displaySpectrum {};
-    std::atomic<int> displayBins { 0 };
+    std::atomic<int>   displayBins { 0 };
+    std::atomic<float> displayBpm { 120.0f };   // live host tempo, for grid/readouts
 
     // The three painted matrices, one independent set per channel (L = 0, R = 1).
     // The editor draws into these; processBlock reads them. Each matrix has its

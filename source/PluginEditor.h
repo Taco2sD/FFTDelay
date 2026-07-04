@@ -5,9 +5,11 @@
 #include "PluginProcessor.h"
 #include "SpectralCurves.h"
 
-// A mouse-paintable spectral curve — one of the three spectral matrices.
-// Frequency runs left->right, the painted value (0..1) runs bottom->top. Drag to
-// draw; double-click to reset the whole curve flat.
+// A mouse-paintable spectral matrix. Frequency runs bottom->top, the painted
+// value runs left->right as a striped silhouette with a luminous edge. The
+// Attenuation matrix displays inverted (paint rightward to CUT, so a fresh
+// unity curve reads as empty). Delay editors overlay tempo gridlines when
+// synced. Drag to draw; double-click to reset the curve to its default.
 class MatrixEditor : public juce::Component,
                      private juce::Timer
 {
@@ -24,13 +26,19 @@ public:
     void mouseDoubleClick (const juce::MouseEvent&) override;
 
 private:
-    void timerCallback() override { repaint(); }
+    void timerCallback() override { repaint(); }   // slow tick: grid/BPM changes
     void paintStroke (juce::Point<float> pos);
+    void drawTempoGrid (juce::Graphics&, juce::Rectangle<float>) const;
+
+    // Stored curve value <-> displayed position (Attenuation shows 1 - value).
+    float toDisplay (float v) const noexcept { return inverted ? 1.0f - v : v; }
+    float toStored  (float d) const noexcept { return inverted ? 1.0f - d : d; }
 
     FFTDelayAudioProcessor& processorRef;
     SpectralCurves* curves;
     SpectralCurves* mirror = nullptr;
     int             matrix;
+    bool            inverted;
     juce::String    title;
     juce::Colour    colour;
     int             lastBand = -1;
