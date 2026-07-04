@@ -103,6 +103,25 @@ struct SpectralCurves
             copyMatrixFrom (other, m);
     }
 
+    // Per-band selection flags, one set per matrix: transient edit state that
+    // the "Sel" modulation destinations act on (offsets apply only to selected
+    // bands). Same lock-free contract as the values; not serialised.
+    bool isSelected (int matrix, int band) const noexcept
+    {
+        return selection[(size_t) matrix][(size_t) band].load (std::memory_order_relaxed);
+    }
+
+    void setSelected (int matrix, int band, bool on) noexcept
+    {
+        selection[(size_t) matrix][(size_t) band].store (on, std::memory_order_relaxed);
+    }
+
+    void clearSelection (int matrix) noexcept
+    {
+        for (auto& band : selection[(size_t) matrix])
+            band.store (false, std::memory_order_relaxed);
+    }
+
     // One pass of a 3-tap smoothing kernel — the "Smooth (Smth)" control, which
     // interpolates/smears a matrix a little more with each repeated click.
     void smooth (int matrix) noexcept
@@ -123,4 +142,5 @@ struct SpectralCurves
 
 private:
     std::array<std::array<std::atomic<float>, numEditBands>, numMatrices> values;
+    std::array<std::array<std::atomic<bool>,  numEditBands>, numMatrices> selection {};
 };

@@ -354,26 +354,87 @@ void MatrixEditor::paint (juce::Graphics& g)
     g.setColour (colour);
     g.strokePath (edge, juce::PathStrokeType (1.5f, juce::PathStrokeType::curved));
 
+    // Selected bands (the "Sel" modulation target): a red row tint per run,
+    // plus the value edge re-stroked in red over those bands.
+    juce::Path selEdge;
+    for (int b = 0; b < n; ++b)
+    {
+        if (! curves->isSelected (matrix, b))
+            continue;
+
+        int runEnd = b;
+        while (runEnd + 1 < n && curves->isSelected (matrix, runEnd + 1))
+            ++runEnd;
+
+        const float yTop = r.getBottom() - r.getHeight() * (float) (runEnd + 1) / (float) n;
+        const float yBot = r.getBottom() - r.getHeight() * (float) b / (float) n;
+        g.setColour (theme::colour (theme::accentRed).withAlpha (0.12f));
+        g.fillRect (juce::Rectangle<float> (r.getX(), yTop, r.getWidth(), yBot - yTop));
+
+        for (int s = b; s <= runEnd; ++s)
+        {
+            const float x = r.getX() + r.getWidth() * toDisplay (curves->get (matrix, s));
+            const float y = r.getBottom() - r.getHeight() * ((float) s + 0.5f) / (float) n;
+            if (s == b) selEdge.startNewSubPath (x, y);
+            else        selEdge.lineTo (x, y);
+        }
+        b = runEnd;
+    }
+    g.setColour (theme::colour (theme::accentRed));
+    g.strokePath (selEdge, juce::PathStrokeType (1.5f, juce::PathStrokeType::curved));
+
     g.setColour (theme::colour (theme::textSecondary));
     g.setFont (theme::label());
     g.drawText (title.toUpperCase(), r.reduced (6.0f), juce::Justification::topLeft);
 }
 
+int MatrixEditor::bandAt (float y) const noexcept
+{
+    const int n = SpectralCurves::numEditBands;
+    return juce::jlimit (0, n - 1,
+                         (int) std::round ((1.0f - y / (float) getHeight()) * (float) (n - 1)));
+}
+
 void MatrixEditor::mouseDown (const juce::MouseEvent& e)
 {
-    lastBand = -1;
-    paintStroke (e.position);
+    lastBand = lastSelBand = -1;
+    selecting = e.mods.isShiftDown();
+    if (selecting)   // starting on a selected band flips the stroke to erase
+        selectMode = ! curves->isSelected (matrix, bandAt (e.position.y));
+
+    selecting ? selectStroke (e.position) : paintStroke (e.position);
 }
 
 void MatrixEditor::mouseDrag (const juce::MouseEvent& e)
 {
-    paintStroke (e.position);
+    selecting ? selectStroke (e.position) : paintStroke (e.position);
 }
 
-void MatrixEditor::mouseDoubleClick (const juce::MouseEvent&)
+void MatrixEditor::mouseDoubleClick (const juce::MouseEvent& e)
 {
-    curves->fill (matrix, SpectralCurves::defaultFor (matrix));
-    if (mirror != nullptr) mirror->fill (matrix, SpectralCurves::defaultFor (matrix));
+    if (e.mods.isShiftDown())
+    {
+        curves->clearSelection (matrix);
+        if (mirror != nullptr) mirror->clearSelection (matrix);
+    }
+    else
+    {
+        curves->fill (matrix, SpectralCurves::defaultFor (matrix));
+        if (mirror != nullptr) mirror->fill (matrix, SpectralCurves::defaultFor (matrix));
+    }
+    repaint();
+}
+
+void MatrixEditor::selectStroke (juce::Point<float> pos)
+{
+    const int band = bandAt (pos.y);
+    const int from = lastSelBand >= 0 ? lastSelBand : band;
+    for (int b = juce::jmin (from, band); b <= juce::jmax (from, band); ++b)
+    {
+        curves->setSelected (matrix, b, selectMode);
+        if (mirror != nullptr) mirror->setSelected (matrix, b, selectMode);
+    }
+    lastSelBand = band;
     repaint();
 }
 

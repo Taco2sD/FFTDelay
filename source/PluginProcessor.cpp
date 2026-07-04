@@ -399,9 +399,10 @@ void FFTDelayAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     // six Input Mod controls.
     const bool lfoOn = apvts.getRawParameterValue ("lfoOn")->load() > 0.5f;
     float lfoValue = 0.0f;
-    float lfoX[SpectralCurves::numMatrices][2] {};   // [matrix][channel] value offset
-    float lfoY[SpectralCurves::numMatrices][2] {};   // [matrix][channel] freq shift
-    float imMod[2][3] {};                            // [channel][control]
+    float lfoX  [SpectralCurves::numMatrices][2] {};   // [matrix][channel] value offset
+    float lfoY  [SpectralCurves::numMatrices][2] {};   // [matrix][channel] freq shift
+    float lfoSel[SpectralCurves::numMatrices][2] {};   // [matrix][channel] selected-bands offset
+    float imMod[2][3] {};                               // [channel][control]
     if (lfoOn)
     {
         const int   wave    = (int) apvts.getRawParameterValue ("lfoWave")->load();
@@ -444,9 +445,9 @@ void FFTDelayAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             if (dest >= 1 && dest <= 18)
             {
                 const int m = (dest - 1) / 6, ch = ((dest - 1) % 6) / 3, axis = (dest - 1) % 3;
-                if      (axis == 0) lfoX[m][ch] += mod;
-                else if (axis == 1) lfoY[m][ch] += mod;
-                // axis == 2 (Sel): applied once band selection exists.
+                if      (axis == 0) lfoX[m][ch]   += mod;
+                else if (axis == 1) lfoY[m][ch]   += mod;
+                else                lfoSel[m][ch] += mod;   // selected bands only
             }
             else if (dest >= 19 && dest <= 24)
             {
@@ -516,8 +517,9 @@ void FFTDelayAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             const int mch   = mtxLink[m] ? 0 : ch;
             const int shift = (int) std::lround (lfoY[m][mch] * (float) (SpectralCurves::numEditBands / 4));
             band = juce::jlimit (0, SpectralCurves::numEditBands - 1, band + shift);
-            return juce::jlimit (0.0f, 1.0f,
-                                 curves[(size_t) mch].get (m, band) + offX[m] + lfoX[m][mch]);
+            const auto& src = curves[(size_t) mch];
+            const float sel = src.isSelected (m, band) ? lfoSel[m][mch] : 0.0f;
+            return juce::jlimit (0.0f, 1.0f, src.get (m, band) + offX[m] + lfoX[m][mch] + sel);
         };
 
         for (int b = 0; b < SpectralDelay::maxBins; ++b)

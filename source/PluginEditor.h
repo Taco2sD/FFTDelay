@@ -10,7 +10,9 @@
 // value runs left->right as a striped silhouette with a luminous edge. The
 // Attenuation matrix displays inverted (paint rightward to CUT, so a fresh
 // unity curve reads as empty). Delay editors overlay tempo gridlines when
-// synced. Drag to draw; double-click to reset the curve to its default.
+// synced. Drag to draw; double-click resets the curve. SHIFT-drag paints the
+// red band selection (the "Sel" modulation target; starting on a selected
+// band erases instead); shift-double-click clears the selection.
 class MatrixEditor : public juce::Component,
                      private juce::Timer
 {
@@ -29,6 +31,8 @@ public:
 private:
     void timerCallback() override { repaint(); }   // slow tick: grid/BPM changes
     void paintStroke (juce::Point<float> pos);
+    void selectStroke (juce::Point<float> pos);
+    int  bandAt (float y) const noexcept;
     void drawTempoGrid (juce::Graphics&, juce::Rectangle<float>) const;
 
     // Stored curve value <-> displayed position (Attenuation shows 1 - value).
@@ -43,6 +47,10 @@ private:
     juce::String    title;
     juce::Colour    colour;
     int             lastBand = -1;
+
+    // Selection-stroke state: set on shift-mouse-down, held for the drag.
+    bool selecting = false, selectMode = true;
+    int  lastSelBand = -1;
 };
 
 // A scrolling spectral history fed from the processor's lock-free spectrum

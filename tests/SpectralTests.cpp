@@ -42,6 +42,18 @@ struct SpectralCurvesTests : juce::UnitTest
         c.copyFrom (d);
         expectEquals (c.get (SpectralCurves::Attenuation, 5), 0.3f);
 
+        beginTest ("selection: off by default, per-band set/clear, value-independent");
+        SpectralCurves sel;
+        for (int b = 0; b < SpectralCurves::numEditBands; ++b)
+            expect (! sel.isSelected (SpectralCurves::Delay, b));
+        sel.setSelected (SpectralCurves::Delay, 42, true);
+        expect (sel.isSelected (SpectralCurves::Delay, 42));
+        expect (! sel.isSelected (SpectralCurves::Feedback, 42));      // per matrix
+        expectEquals (sel.get (SpectralCurves::Delay, 42),
+                      SpectralCurves::defaultFor (SpectralCurves::Delay));   // values untouched
+        sel.clearSelection (SpectralCurves::Delay);
+        expect (! sel.isSelected (SpectralCurves::Delay, 42));
+
         beginTest ("smooth applies a 3-tap kernel to a spike");
         SpectralCurves s;
         s.fill (SpectralCurves::Delay, 0.0f);
