@@ -215,10 +215,28 @@ private:
     Sonogram sonoIn  { processorRef, false, "IN" };
     Sonogram sonoOut { processorRef, true,  "OUT" };
 
-    // Actions (not stored parameters): Smooth smears the matrices a little more
-    // per click; Reset clears all delay memory at the next audio block.
-    juce::TextButton smoothButton { "Smooth" };
-    juce::TextButton resetButton  { "Reset Dly" };
+    // The EDIT card's operation surface (all actions / UI state, not params).
+    // Ops apply to every enabled target (channel x matrix toggle); GO writes the
+    // selected generator shape scaled by AMP with PER cycles across the grid;
+    // UNDO restores the single-level snapshot taken before the last op.
+    std::array<juce::TextButton, 6> opTargets;   // AL DL FL / AR DR FR
+    std::array<juce::TextButton, 6> genShapes;   // SIN TRI SQR SW- SW+ RND (radio)
+    juce::Slider     ampBox, perBox;
+    juce::TextButton qntButton  { "QNT" },  avgButton  { "AVG" },
+                     flpXButton { "FLPX" }, flpYButton { "FLPY" },
+                     smoothButton { "SMTH" }, goButton { "GO" },
+                     undoButton { "UNDO" },   resetButton { "RST DLY" };
+
+    struct UndoState
+    {
+        std::array<std::array<std::array<float, SpectralCurves::numEditBands>,
+                              SpectralCurves::numMatrices>, 2> v {};
+        bool valid = false;
+    } undoState;
+
+    void snapshotForUndo();
+    void restoreUndo();
+    void forEachOpTarget (const std::function<void (int channel, int matrix)>&);
 
     // The graph-control strip sits between the L (top) and R (bottom) matrix
     // rows: one cluster per matrix column with its stage Bypass [B], stereo

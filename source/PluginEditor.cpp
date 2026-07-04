@@ -584,18 +584,85 @@ FFTDelayAudioProcessorEditor::FFTDelayAudioProcessorEditor (FFTDelayAudioProcess
             addAndMakeVisible (*b);
     }
 
-    // Smooth smears both channels' matrices a little more per click.
-    smoothButton.onClick = [this]
+    // --- EDIT card: op targets, transformers, generators ----------------------
+    static const char* targetNames[6] = { "AL", "DL", "FL", "AR", "DR", "FR" };
+    for (int i = 0; i < 6; ++i)
     {
-        for (int ch = 0; ch < 2; ++ch)
-            for (int m = 0; m < SpectralCurves::numMatrices; ++m)
-                processorRef.curves[(size_t) ch].smooth (m);
-        repaintMatrices();
-    };
-    addAndMakeVisible (smoothButton);
+        auto& b = opTargets[(size_t) i];
+        b.setButtonText (targetNames[i]);
+        b.setClickingTogglesState (true);
+        b.setToggleState (i % 3 == 1, juce::dontSendNotification);   // delay L+R default
+        addAndMakeVisible (b);
+    }
 
+    static const char* shapeNames[6] = { "SIN", "TRI", "SQR", "SW-", "SW+", "RND" };
+    for (int i = 0; i < 6; ++i)
+    {
+        auto& b = genShapes[(size_t) i];
+        b.setButtonText (shapeNames[i]);
+        b.setClickingTogglesState (true);
+        b.setRadioGroupId (0x5157);
+        addAndMakeVisible (b);
+    }
+    genShapes[0].setToggleState (true, juce::dontSendNotification);
+
+    for (auto* s : { &ampBox, &perBox })
+    {
+        s->setSliderStyle (juce::Slider::LinearBar);
+        s->setTextBoxIsEditable (true);
+        addAndMakeVisible (*s);
+    }
+    ampBox.setRange (0.0, 1.0, 0.01);   ampBox.setValue (1.0);
+    perBox.setRange (0.25, 16.0, 0.25); perBox.setValue (1.0);
+
+    // Transformers operate on every enabled target after one undo snapshot.
+    auto op = [this] (std::function<void (SpectralCurves&, int)> fn)
+    {
+        return [this, apply = std::move (fn)]
+        {
+            snapshotForUndo();
+            forEachOpTarget ([this, &apply] (int ch, int m) { apply (processorRef.curves[(size_t) ch], m); });
+            repaintMatrices();
+        };
+    };
+    qntButton.onClick  = op ([this] (SpectralCurves& c, int m)
+    {
+        // Delay quantizes to the live tempo grid when synced; otherwise (and for
+        // the other matrices) snap to eighths of full scale.
+        float step = 0.125f;
+        if (m == SpectralCurves::Delay
+            && processorRef.apvts.getRawParameterValue ("delaySync")->load() > 0.5f)
+        {
+            static constexpr float ranges[] = { 0.375f, 0.75f, 1.5f, 3.0f, 6.0f, 12.0f };
+            static constexpr float grids[]  = { 1.0f, 0.5f, 1.0f / 3.0f, 0.25f };
+            const float maxDelay = ranges[juce::jlimit (0, 5,
+                (int) processorRef.apvts.getRawParameterValue ("delayRange")->load())];
+            const float gridSec  = (60.0f / processorRef.displayBpm.load())
+                * grids[juce::jlimit (0, 3, (int) processorRef.apvts.getRawParameterValue ("delayGrid")->load())];
+            step = juce::jlimit (0.001f, 1.0f, gridSec / maxDelay);
+        }
+        c.quantize (m, step);
+    });
+    avgButton.onClick    = op ([] (SpectralCurves& c, int m) { c.average (m); });
+    flpXButton.onClick   = op ([] (SpectralCurves& c, int m) { c.flipValues (m); });
+    flpYButton.onClick   = op ([] (SpectralCurves& c, int m) { c.reverseBands (m); });
+    smoothButton.onClick = op ([] (SpectralCurves& c, int m) { c.smooth (m); });
+
+    goButton.onClick = op ([this] (SpectralCurves& c, int m)
+    {
+        int shape = 0;
+        for (int i = 0; i < 6; ++i)
+            if (genShapes[(size_t) i].getToggleState())
+                shape = i;
+        c.generate (m, shape, (float) ampBox.getValue(), (float) perBox.getValue(),
+                    (unsigned) juce::Random::getSystemRandom().nextInt());
+    });
+
+    undoButton.onClick = [this] { restoreUndo(); };
     resetButton.onClick = [this] { processorRef.requestEngineReset(); };
-    addAndMakeVisible (resetButton);
+    for (auto* b : { &qntButton, &avgButton, &flpXButton, &flpYButton,
+                     &smoothButton, &goButton, &undoButton, &resetButton })
+        addAndMakeVisible (*b);
 
     bpmLabel.setJustificationType (juce::Justification::centredRight);
     bpmLabel.setColour (juce::Label::textColourId, theme::colour (theme::accentDly));
@@ -734,6 +801,33 @@ void FFTDelayAudioProcessorEditor::repaintMatrices()
 {
     for (auto& e : matrixEditors)
         e->repaint();
+}
+
+void FFTDelayAudioProcessorEditor::forEachOpTarget (const std::function<void (int, int)>& fn)
+{
+    for (int i = 0; i < 6; ++i)                    // AL DL FL / AR DR FR
+        if (opTargets[(size_t) i].getToggleState())
+            fn (i / 3, i % 3);
+}
+
+void FFTDelayAudioProcessorEditor::snapshotForUndo()
+{
+    for (int ch = 0; ch < 2; ++ch)
+        for (int m = 0; m < SpectralCurves::numMatrices; ++m)
+            for (int b = 0; b < SpectralCurves::numEditBands; ++b)
+                undoState.v[(size_t) ch][(size_t) m][(size_t) b] = processorRef.curves[(size_t) ch].get (m, b);
+    undoState.valid = true;
+}
+
+void FFTDelayAudioProcessorEditor::restoreUndo()
+{
+    if (! undoState.valid)
+        return;
+    for (int ch = 0; ch < 2; ++ch)
+        for (int m = 0; m < SpectralCurves::numMatrices; ++m)
+            for (int b = 0; b < SpectralCurves::numEditBands; ++b)
+                processorRef.curves[(size_t) ch].set (m, b, undoState.v[(size_t) ch][(size_t) m][(size_t) b]);
+    repaintMatrices();
 }
 
 void FFTDelayAudioProcessorEditor::updateLinkMirrors()
@@ -986,13 +1080,33 @@ void FFTDelayAudioProcessorEditor::layoutContent()
         midiButton.setBounds (btns.reduced (2, 0));
     }
 
-    {   // EDIT: whole-curve offsets + curve actions.
+    {   // EDIT: op targets, offsets, transformers, generators, actions.
         auto in = interiorOf (cardBounds[1]);
-        knobRow (in.removeFromTop (72), { "attOffX", "delayOffX", "fbOffX" });
-        in.removeFromTop (4);
-        auto row = in.removeFromTop (20);
-        smoothButton.setBounds (row.removeFromLeft (row.getWidth() / 2).reduced (2, 0));
-        resetButton.setBounds (row.reduced (2, 0));
+        auto fillRow = [] (juce::Rectangle<int> row, auto&&... comps)
+        {
+            const int w = row.getWidth() / (int) sizeof... (comps);
+            (comps->setBounds (row.removeFromLeft (w).reduced (1, 0)), ...);
+        };
+
+        auto targets = in.removeFromTop (16);
+        const int tw = targets.getWidth() / 6;
+        for (auto& b : opTargets)
+            b.setBounds (targets.removeFromLeft (tw).reduced (1, 0));
+        in.removeFromTop (3);
+
+        knobRow (in.removeFromTop (52), { "attOffX", "delayOffX", "fbOffX" });
+        in.removeFromTop (3);
+
+        fillRow (in.removeFromTop (16), &qntButton, &avgButton, &flpXButton, &flpYButton, &smoothButton);
+        in.removeFromTop (3);
+
+        auto shapes = in.removeFromTop (16);
+        const int sw = shapes.getWidth() / 6;
+        for (auto& b : genShapes)
+            b.setBounds (shapes.removeFromLeft (sw).reduced (1, 0));
+        in.removeFromTop (3);
+
+        fillRow (in.removeFromTop (16), &ampBox, &perBox, &goButton, &undoButton, &resetButton);
     }
 
     {   // LFO: on/sync/wave/div, then rate + depths, then destinations.

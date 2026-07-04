@@ -54,6 +54,37 @@ struct SpectralCurvesTests : juce::UnitTest
         sel.clearSelection (SpectralCurves::Delay);
         expect (! sel.isSelected (SpectralCurves::Delay, 42));
 
+        beginTest ("transformers: quantize, average, flip values, reverse bands");
+        SpectralCurves t;
+        t.set (SpectralCurves::Delay, 0, 0.30f);
+        t.quantize (SpectralCurves::Delay, 0.25f);
+        expectWithinAbsoluteError (t.get (SpectralCurves::Delay, 0), 0.25f, 1.0e-6f);
+
+        t.set (SpectralCurves::Delay, 0, 1.0f);      // mean of one 1.0 + 159 zeros
+        for (int b = 1; b < SpectralCurves::numEditBands; ++b)
+            t.set (SpectralCurves::Delay, b, 0.0f);
+        t.average (SpectralCurves::Delay);
+        expectWithinAbsoluteError (t.get (SpectralCurves::Delay, 80),
+                                   1.0f / (float) SpectralCurves::numEditBands, 1.0e-6f);
+
+        t.set (SpectralCurves::Feedback, 3, 0.2f);
+        t.flipValues (SpectralCurves::Feedback);
+        expectWithinAbsoluteError (t.get (SpectralCurves::Feedback, 3), 0.8f, 1.0e-6f);
+
+        t.fill (SpectralCurves::Attenuation, 0.0f);
+        t.set (SpectralCurves::Attenuation, 0, 1.0f);
+        t.reverseBands (SpectralCurves::Attenuation);
+        expectWithinAbsoluteError (t.get (SpectralCurves::Attenuation,
+                                          SpectralCurves::numEditBands - 1), 1.0f, 1.0e-6f);
+        expectWithinAbsoluteError (t.get (SpectralCurves::Attenuation, 0), 0.0f, 1.0e-6f);
+
+        beginTest ("generator: saw-up spans 0..amp across one cycle");
+        SpectralCurves gen;
+        gen.generate (SpectralCurves::Delay, 4, 0.5f, 1.0f, 1u);
+        expectWithinAbsoluteError (gen.get (SpectralCurves::Delay, 0), 0.0f, 1.0e-6f);
+        expectWithinAbsoluteError (gen.get (SpectralCurves::Delay,
+                                            SpectralCurves::numEditBands - 1), 0.5f, 1.0e-2f);
+
         beginTest ("smooth applies a 3-tap kernel to a spike");
         SpectralCurves s;
         s.fill (SpectralCurves::Delay, 0.0f);

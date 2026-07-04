@@ -122,8 +122,9 @@ struct SpectralCurves
             band.store (false, std::memory_order_relaxed);
     }
 
-    // One pass of a 3-tap smoothing kernel — the "Smooth (Smth)" control, which
-    // interpolates/smears a matrix a little more with each repeated click.
+    // --- Destructive curve operations (the EDIT card's transformers) ----------
+
+    // One pass of a 3-tap smoothing kernel; repeated clicks smear further.
     void smooth (int matrix) noexcept
     {
         auto& m = values[(size_t) matrix];
@@ -137,6 +138,69 @@ struct SpectralCurves
             const float r = tmp[(size_t) (b < numEditBands - 1 ? b + 1 : numEditBands - 1)];
             m[(size_t) b].store (0.25f * l + 0.5f * tmp[(size_t) b] + 0.25f * r,
                                  std::memory_order_relaxed);
+        }
+    }
+
+    // Snap every value to the nearest multiple of `step` (e.g. the tempo grid).
+    void quantize (int matrix, float step) noexcept
+    {
+        if (step <= 0.0f)
+            return;
+        for (int b = 0; b < numEditBands; ++b)
+            set (matrix, b, std::min (1.0f, std::round (get (matrix, b) / step) * step));
+    }
+
+    // Flatten the curve to its mean value.
+    void average (int matrix) noexcept
+    {
+        float sum = 0.0f;
+        for (int b = 0; b < numEditBands; ++b)
+            sum += get (matrix, b);
+        fill (matrix, sum / (float) numEditBands);
+    }
+
+    // Mirror the value axis (v -> 1 - v).
+    void flipValues (int matrix) noexcept
+    {
+        for (int b = 0; b < numEditBands; ++b)
+            set (matrix, b, 1.0f - get (matrix, b));
+    }
+
+    // Mirror the frequency axis (low <-> high bands).
+    void reverseBands (int matrix) noexcept
+    {
+        for (int b = 0; b < numEditBands / 2; ++b)
+        {
+            const int   o  = numEditBands - 1 - b;
+            const float lo = get (matrix, b), hi = get (matrix, o);
+            set (matrix, b, hi);
+            set (matrix, o, lo);
+        }
+    }
+
+    // Write a waveform across the frequency axis. Shapes: 0 sine, 1 triangle,
+    // 2 square, 3 saw down, 4 saw up, 5 random (seeded, one value per band).
+    void generate (int matrix, int shape, float amp, float cycles, unsigned seed) noexcept
+    {
+        unsigned rng = seed;
+        for (int b = 0; b < numEditBands; ++b)
+        {
+            const float ph = cycles * (float) b / (float) (numEditBands - 1);
+            float t = ph - std::floor (ph);
+            if (t == 0.0f && ph > 0.0f)
+                t = 1.0f;   // sample exact cycle boundaries as the ramp's endpoint
+            float w = 0.0f;
+            switch (shape)
+            {
+                case 0:  w = 0.5f - 0.5f * std::cos (6.2831853f * t); break;
+                case 1:  w = 1.0f - std::abs (2.0f * t - 1.0f);       break;
+                case 2:  w = t < 0.5f ? 1.0f : 0.0f;                  break;
+                case 3:  w = 1.0f - t;                                break;
+                case 4:  w = t;                                       break;
+                default: rng = rng * 1664525u + 1013904223u;
+                         w = (float) (rng >> 8) / (float) (1u << 24); break;
+            }
+            set (matrix, b, std::min (1.0f, amp * w));
         }
     }
 
