@@ -54,6 +54,49 @@ struct SpectralCurvesTests : juce::UnitTest
 };
 
 //==============================================================================
+struct EditMaskTests : juce::UnitTest
+{
+    EditMaskTests() : juce::UnitTest ("EditMask mapping") {}
+
+    void runTest() override
+    {
+        constexpr int last = SpectralCurves::numEditBands - 1;
+
+        for (int mask = 0; mask <= 3; ++mask)
+            for (int bins : { 64, 512, 1024 })
+            {
+                beginTest ("mask " + juce::String (mask) + " / " + juce::String (bins)
+                           + " bins: monotonic and in range");
+                int prev = 0;
+                for (int b = 0; b < bins; ++b)
+                {
+                    const int band = SpectralCurves::binToEditBand (b, bins, mask);
+                    expect (band >= prev && band >= 0 && band <= last);
+                    prev = band;
+                }
+            }
+
+        beginTest ("linear spans the full grid");
+        expectEquals (SpectralCurves::binToEditBand (0,    1024, SpectralCurves::Linear), 0);
+        expectEquals (SpectralCurves::binToEditBand (1023, 1024, SpectralCurves::Linear), last);
+
+        beginTest ("adapted 2x: lowest 30 bins get one 2-column group each");
+        for (int b = 0; b < 30; ++b)
+            expectEquals (SpectralCurves::binToEditBand (b, 1024, SpectralCurves::Adapted2x), b * 2);
+        expect (SpectralCurves::binToEditBand (1023, 1024, SpectralCurves::Adapted2x) <= 158);
+
+        beginTest ("adapted 4x: lowest 15 bins get one 4-column group each");
+        for (int b = 0; b < 15; ++b)
+            expectEquals (SpectralCurves::binToEditBand (b, 1024, SpectralCurves::Adapted4x), b * 4);
+        expect (SpectralCurves::binToEditBand (1023, 1024, SpectralCurves::Adapted4x) <= 156);
+
+        beginTest ("logarithmic gives low bins more grid than linear");
+        expect (SpectralCurves::binToEditBand (32, 1024, SpectralCurves::Logarithmic)
+                > SpectralCurves::binToEditBand (32, 1024, SpectralCurves::Linear));
+    }
+};
+
+//==============================================================================
 struct MidiLearnTests : juce::UnitTest
 {
     MidiLearnTests() : juce::UnitTest ("MidiLearnManager") {}
@@ -214,6 +257,7 @@ struct SpectralDelayTests : juce::UnitTest
 
 //==============================================================================
 static SpectralCurvesTests spectralCurvesTests;
+static EditMaskTests       editMaskTests;
 static MidiLearnTests      midiLearnTests;
 static SpectralDelayTests  spectralDelayTests;
 

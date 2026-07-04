@@ -71,9 +71,6 @@ public:
     std::atomic<int>      pendingPresetAction { 0 };  // +1 next, -1 prev
     std::function<void()> onPresetChangedFromMidi;
 
-    // Map an analysis bin to its edit-band control point under the chosen mask.
-    static int binToEditBand (int bin, int activeBins, int mask) noexcept;
-
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 

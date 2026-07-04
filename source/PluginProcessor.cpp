@@ -202,23 +202,6 @@ FFTDelayAudioProcessor::createParameterLayout()
     return layout;
 }
 
-int FFTDelayAudioProcessor::binToEditBand (int bin, int activeBins, int mask) noexcept
-{
-    const int lastBin  = juce::jmax (1, activeBins - 1);
-    const int lastBand = SpectralCurves::numEditBands - 1;
-
-    // Logarithmic frequency axis vs the default linear one.
-    float ratio = mask == 3 ? std::log (1.0f + (float) bin) / std::log (1.0f + (float) lastBin)
-                            : (float) bin / (float) lastBin;
-
-    int band = juce::jlimit (0, lastBand, (int) std::lround (ratio * (float) lastBand));
-
-    // Adapted masks coarsen the editable resolution (2x -> 80 points, 4x -> 40).
-    if (mask == 1) band = (band / 2) * 2;
-    else if (mask == 2) band = (band / 4) * 4;
-
-    return band;
-}
 
 void FFTDelayAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
@@ -481,7 +464,7 @@ void FFTDelayAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 
         for (int b = 0; b < SpectralDelay::maxBins; ++b)
         {
-            const int band = binToEditBand (juce::jmin (b, activeBins - 1), activeBins, maskIdx);
+            const int band = SpectralCurves::binToEditBand (b, activeBins, maskIdx);
 
             // Curve bottom is a true zero multiplier (full cut), top is unity.
             gainCurve[(size_t) b]     = curveVal (SpectralCurves::Attenuation, band);

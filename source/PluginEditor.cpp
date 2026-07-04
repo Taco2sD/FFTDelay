@@ -221,7 +221,7 @@ void MatrixEditor::paint (juce::Graphics& g)
             const float mag = processorRef.displaySpectrum[(size_t) b].load (std::memory_order_relaxed);
             const float dB  = juce::Decibels::gainToDecibels (mag, -90.0f);
             const float y01 = juce::jlimit (0.0f, 1.0f, (dB + 70.0f) / 70.0f);
-            const int   band = FFTDelayAudioProcessor::binToEditBand (b, specBins, mask);
+            const int   band = SpectralCurves::binToEditBand (b, specBins, mask);
             const float x    = r.getX() + r.getWidth() * (float) band / n1;
             spec.lineTo (x, r.getBottom() - r.getHeight() * y01);
         }

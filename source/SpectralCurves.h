@@ -1,7 +1,9 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <atomic>
+#include <cmath>
 
 // The three painted per-band "matrices" (Attenuation / Delay / Feedback), stored as per-edit-band
 // curves. Each curve is a row of `numEditBands` control points the user paints;
@@ -12,9 +14,48 @@
 // that safe without ever blocking the audio thread.
 struct SpectralCurves
 {
-    static constexpr int numEditBands = 160;   // the original's edit resolution
+    static constexpr int numEditBands = 160;   // columns of the edit grid
 
     enum Matrix { Attenuation = 0, Delay = 1, Feedback = 2, numMatrices = 3 };
+
+    enum Mask { Linear = 0, Adapted2x = 1, Adapted4x = 2, Logarithmic = 3 };
+
+    // Maps an analysis bin onto the edit grid under the given mask. Masks trade
+    // editable resolution for musical focus: Linear spreads every bin evenly
+    // across all 160 columns; the Adapted masks coarsen the grid into groups of
+    // 2 or 4 columns and give the lowest bins a group EACH (1:1), packing the
+    // remaining bins into the groups left over — fine control where music is
+    // dense, broad strokes up top; Logarithmic warps the whole axis.
+    static int binToEditBand (int bin, int activeBins, int mask) noexcept
+    {
+        const int lastBin = std::max (1, activeBins - 1);
+        bin = std::clamp (bin, 0, lastBin);
+
+        switch (mask)
+        {
+            case Adapted2x:
+            case Adapted4x:
+            {
+                const int span   = mask == Adapted2x ? 2 : 4;   // columns per group
+                const int groups = numEditBands / span;         // 80 / 40
+                const int fine   = std::min (groups * 3 / 8, activeBins);   // 30 / 15
+
+                int group = bin;
+                if (bin >= fine)
+                {
+                    const int coarseBins = std::max (1, activeBins - fine);
+                    group = fine + (bin - fine) * (groups - fine) / coarseBins;
+                }
+                return std::clamp (group, 0, groups - 1) * span;
+            }
+            case Logarithmic:
+                return (int) std::lround ((numEditBands - 1)
+                                          * std::log (1.0f + (float) bin)
+                                          / std::log (1.0f + (float) lastBin));
+            default:
+                return (int) std::lround ((numEditBands - 1) * (float) bin / (float) lastBin);
+        }
+    }
 
     // The curves ARE the parameters (there are no global delay/feedback/gain
     // knobs behind them). A fresh instance is a clean passthrough: Attenuation
